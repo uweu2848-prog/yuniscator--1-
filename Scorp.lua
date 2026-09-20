@@ -158,7 +158,7 @@ local function startHub()
 -- Raw URL format:  https://raw.githubusercontent.com/<user>/<repo>/<branch>/<file>
 -- (NOT the github.com page link and NOT the .git clone link – those don't return the script text)
 -- The repo must be PUBLIC or the game can't download it.
-local LIB_URL = "https://raw.githubusercontent.com/uweu2848-prog/sliver-surfer-test/main/ScorpLib.lua"
+local LIB_URL = "https://raw.githubusercontent.com/uweu2848-prog/yuniscator--1-/main/ScorpLib.lua"
 
 local function loadLib()
     -- Local testing instead:  local src = readfile("ScorpLib.lua")
