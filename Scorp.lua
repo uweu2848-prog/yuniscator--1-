@@ -189,7 +189,7 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 local Window = Scorp:CreateWindow({
     Title        = "Scorp",
-    Subtitle     = "A Out Of Space Experince. ~Made By Yuniku.  ·  v0.1",
+    Subtitle     = "A Out Of Space Experince. ~Made By Yuniku.  ·  v0.3",
     Theme        = "Silver Surfer",           -- Silver Surfer | Power Cosmic | Zenn-La | Deep Space
     ToggleKey    = Enum.KeyCode.RightShift,   -- show / hide
     UnloadKey    = Enum.KeyCode.Delete,       -- destroy the UI
@@ -210,7 +210,7 @@ local Home = Window:CreateTab("Home", { Icon = "🏄" })
 do
     local sec = Home:CreateSection("Welcome", true)
     sec:AddLabel("Scorp is running. Everything here is a placeholder.", { Wrap = true })
-    sec:AddLabel("Made by YOUR_NAME", { Color = Window.Theme.TextDim })
+    sec:AddLabel("Made by Drew", { Color = Window.Theme.TextDim })
     sec:AddButton("Test Notification", function()
         Window:Notify("Scorp", "Notifications are working.", 3)
     end)
