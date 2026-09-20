@@ -14,7 +14,7 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
 -- Replace this with your actual Railway or deployed server URL
-local API_URL = "https://sliver-surfer-test.up.railway.app"
+local API_URL = "https://sliver-surfer-test-production.up.railway.app"
 
 -- Executor-specific request function
 local http_request = (request or syn and syn.request or http and http.request)

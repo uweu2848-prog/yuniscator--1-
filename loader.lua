@@ -3,7 +3,7 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
 -- Replace this with your live backend server URL once deployed (or http://localhost:3000 for local testing)
-local SERVER_URL = "https://sliver-surfer-test.up.railway.app"
+local SERVER_URL = "https://sliver-surfer-test-production.up.railway.app"
 
 -- Cross-executor HTTP request handler
 local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
