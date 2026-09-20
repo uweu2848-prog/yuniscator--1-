@@ -8,9 +8,9 @@ app.use(express.json());
 // ====================
 // CONFIGURATION
 // ====================
-const DISCORD_WEBHOOK = "YOUR_DISCORD_WEBHOOK_URL_HERE";
-const OWNER_USER_ID = "YOUR_ROBLOX_USER_ID"; // Your Roblox User ID so you never blacklist yourself
-const ADMIN_PASSWORD = "SecretPassword123";  // Used to authorize admin API actions
+const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1551258745021923360/sP54LGzH02QN_Htld-DiTD6-JvNQ5IN7mV7dcWzNbNOT1yh4LGnewj410uPbyp8vGs28";
+const OWNER_USER_ID = "5636766076"; // Your Roblox User ID so you never blacklist yourself
+const ADMIN_PASSWORD = "drewdrew";  // Used to authorize admin API actions
 
 // __dirname is src/, but obfuscate.js writes to <project root>/dist/script.lua,
 // so both paths need to step up one level to the project root.
