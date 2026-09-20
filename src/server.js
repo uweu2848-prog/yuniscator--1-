@@ -45,8 +45,11 @@ const lastFetch = new Map();      // identityKey -> timestamp
 const ipIdentities = new Map();   // ip -> Map(identityKey -> firstSeen)
 const suspiciousIps = new Map();  // ip -> { identities: [...], flaggedAt }
 
+// NEW: Active users tracking
+const activeUsers = new Set();
+
 function identityKey(userId, hwid) {
-    return `${userId || 'unknown'}::${hwid || 'unknown'}`;
+    return `${userId \vert{}\vert{} 'unknown'}::${hwid || 'unknown'}`;
 }
 
 // ====================
@@ -314,6 +317,32 @@ app.post('/api/tamper', async (req, res) => {
     await recordTamper(userId, hwid, req.ip, reason, username);
     // Respond with 200 OK so network loggers don't raise suspicion
     res.status(200).send("OK");
+});
+
+// 3. NEW: Active Users Endpoints
+app.post('/api/users/online', (req, res) => {
+    const userId = req.headers['x-user-id'];
+    const username = req.headers['x-user-name'];
+    
+    // Automatically uses the OWNER_USER_ID from the config section
+    const isOwner = String(userId) === String(OWNER_USER_ID); 
+    
+    activeUsers.add(JSON.stringify({ userId, username, isOwner }));
+    
+    res.json({
+        success: true,
+        allUsers: Array.from(activeUsers).map(u => JSON.parse(u)),
+        yourRole: isOwner ? 'owner' : 'member'
+    });
+});
+
+app.post('/api/users/offline', (req, res) => {
+    const userId = req.headers['x-user-id'];
+    activeUsers.forEach(user => {
+        const parsed = JSON.parse(user);
+        if (parsed.userId === userId) activeUsers.delete(user);
+    });
+    res.json({ success: true });
 });
 
 // ====================
