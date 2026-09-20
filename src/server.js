@@ -8,7 +8,7 @@ app.use(express.json());
 // ====================
 // CONFIGURATION
 // ====================
-const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1551258745021923360/sP54LGzH02QN_Htld-DiTD6-JvNQ5IN7mV7dcWzNbNOT1yh4LGnewj410uPbyp8vGs28";
+const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1551315078241058839/em_L5Ru4DgL5fenzidUTN7QgrQUruY6hgX5KdnXr9nlVho_eqdibC40aYcZZVIDRELhs";
 const OWNER_USER_ID = "5636766076"; // Your Roblox User ID so you never blacklist yourself
 const ADMIN_PASSWORD = "drewdrew";  // Used to authorize admin API actions
 
