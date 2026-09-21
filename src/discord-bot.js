@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Optional Discord bot: lets staff change a player's Scorp nametag role from Discord,
+ * ptional Discord bot: lets staff change a player's Scorp nametag role from Discord,
  * without touching the HTTP admin API by hand.
  *
  * Started by server.js only if DISCORD_TOKEN is set (see .env.example). Runs in the
