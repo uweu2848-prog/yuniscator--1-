@@ -1,9 +1,0 @@
-{
-  "id": "b64701f6",
-  "builtAt": "2026-09-21T04:42:43.425Z",
-  "bytes": 29029,
-  "sources": [
-    "src/script.lua",
-    "src/nametags.lua"
-  ]
-}
