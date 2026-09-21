@@ -734,6 +734,12 @@ function Library:CreateWindow(opts)
         self._widget = w
         self._widgetScale = ws
         w.Visible = not self.Visible -- only needed to *reopen* a closed panel; see Toggle() below
+        w.Active = not self.Visible  -- see Toggle() below: Active, not just Visible, is what stops it stealing clicks
+    end
+
+    -- ── Info bar (player count / ping / fps HUD, independent of the panel being open) ──
+    if opts.InfoBar ~= false then
+        self:_buildInfoBar(opts)
     end
 
     -- ── Global keys ──
@@ -756,6 +762,121 @@ function Library:CreateWindow(opts)
     return self
 end
 
+--- Persistent top-left HUD: player count (with a floating +1/-1 on join/leave),
+-- ping, fps, and a collapse arrow. Independent of the main panel — stays up
+-- whether the panel is open, closed, or the widget is hidden mid-tween.
+-- opts.InfoBar = false disables it entirely.
+function Window:_buildInfoBar(opts)
+    local ok, Stats = pcall(function() return game:GetService("Stats") end)
+    if not ok then Stats = nil end
+
+    local bar = Make("Frame", {
+        Name = "InfoBar", Parent = self.Gui, Position = UDim2.new(0, 20, 0, 20),
+        Size = UDim2.fromOffset(0, 36), AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundColor3 = Color3.fromRGB(12, 16, 32), BackgroundTransparency = 0.2, ZIndex = 60,
+    })
+    Round(bar)
+    self:_bind(function(t) bar.BackgroundColor3 = t.MainBg end)
+    self:_stroke(bar, 1, 0.35)
+    Make("UIPadding", { Parent = bar, PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) })
+    local row = Make("Frame", { Parent = bar, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1 })
+    Make("UIListLayout", {
+        Parent = row, FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder,
+        VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 14),
+    })
+
+    local collapsibles = {}
+    local function stat(icon, initial)
+        local holder = Make("Frame", { Parent = row, Size = UDim2.fromOffset(0, 20), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1 })
+        Make("UIListLayout", {
+            Parent = holder, FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 5),
+        })
+        Make("TextLabel", { Parent = holder, Size = UDim2.fromOffset(14, 20), BackgroundTransparency = 1, Text = icon, TextSize = 13, Font = Enum.Font.GothamBold })
+        local lbl = Make("TextLabel", {
+            Parent = holder, Size = UDim2.fromOffset(0, 20), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+            Text = initial, TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+        })
+        table.insert(collapsibles, holder)
+        return lbl, holder
+    end
+
+    local arrow = Make("TextButton", {
+        Parent = row, Size = UDim2.fromOffset(14, 20), BackgroundTransparency = 1, Text = "\226\150\190",
+        TextColor3 = self.Theme.TextDim, Font = Enum.Font.GothamBold, TextSize = 12, AutoButtonColor = false, LayoutOrder = -1,
+    })
+    local playersLbl, playersHolder = stat("\240\159\145\165", "1/1")
+
+    -- ── Player count, with a rising +1 / -1 bump on join/leave ──
+    local function refreshPlayerCount()
+        playersLbl.Text = tostring(#Players:GetPlayers()) .. "/" .. tostring(Players.MaxPlayers)
+    end
+    refreshPlayerCount()
+
+    local function bump(text, color)
+        local tag = Make("TextLabel", {
+            Parent = playersHolder, Size = UDim2.fromOffset(24, 20), Position = UDim2.new(1, 4, 0, 0),
+            BackgroundTransparency = 1, Text = text, TextColor3 = color,
+            Font = Enum.Font.GothamBold, TextSize = 11, ZIndex = 61,
+        })
+        local scale = Make("UIScale", { Parent = tag, Scale = 0.6 })
+        Tween(scale, { Scale = 1 }, 0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        Tween(tag, { Position = UDim2.new(1, 4, -1, 0), TextTransparency = 1 }, 0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        task.delay(0.7, function() tag:Destroy() end)
+    end
+
+    self:_connect(Players.PlayerAdded, function()
+        refreshPlayerCount()
+        bump("+1", self.Theme.Success or Color3.fromRGB(90, 220, 140))
+    end)
+    self:_connect(Players.PlayerRemoving, function()
+        -- the leaving player is still in :GetPlayers() while this event is firing
+        task.defer(refreshPlayerCount)
+        bump("-1", self.Theme.Danger or Color3.fromRGB(230, 90, 90))
+    end)
+
+    -- ── Ping (network round-trip), refreshed once a second ──
+    local pingLbl = stat("\226\143\177", "-- ms")
+    task.spawn(function()
+        while bar.Parent do
+            local ms = nil
+            local pOk, ping = pcall(function() return LocalPlayer:GetNetworkPing() end)
+            if pOk and type(ping) == "number" then
+                ms = math.floor(ping * 1000 + 0.5)
+            elseif Stats then
+                local sOk, item = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"] end)
+                if sOk and item then ms = math.floor(item:GetValue() + 0.5) end
+            end
+            pingLbl.Text = ms and (ms .. " ms") or "-- ms"
+            task.wait(1)
+        end
+    end)
+
+    -- ── FPS, averaged over a rolling half-second so the number doesn't flicker ──
+    local fpsLbl = stat("\226\154\161", "-- fps")
+    local frames, accum = 0, 0
+    self:_connect(RunService.RenderStepped, function(dt)
+        frames = frames + 1
+        accum = accum + dt
+        if accum >= 0.5 then
+            fpsLbl.Text = tostring(math.floor(frames / accum + 0.5)) .. " fps"
+            frames = 0
+            accum = 0
+        end
+    end)
+
+    -- ── Collapse to just the arrow (click again to expand) ──
+    local collapsed = false
+    arrow.MouseButton1Click:Connect(function()
+        self:_play("Click")
+        collapsed = not collapsed
+        arrow.Text = collapsed and "\226\150\184" or "\226\150\190"
+        for _, holder in ipairs(collapsibles) do holder.Visible = not collapsed end
+    end)
+
+    self._infoBar = bar
+end
+
 -- ───────────────────────────────────────────────────────────────────────────
 --  Window public API
 -- ───────────────────────────────────────────────────────────────────────────
@@ -774,18 +895,29 @@ function Window:Toggle(state)
     if self.Destroyed then return end
     if state == nil then state = not self.Visible end
     self.Visible = state
-    -- The floating widget only exists to reopen a *closed* panel. Left visible while the
+    -- The floating widget only exists to reopen a *closed* panel. Left clickable while the
     -- panel is open, it sits at a fixed screen corner with a high ZIndex and — whenever the
-    -- open panel's sidebar/tabs/buttons happen to overlap that corner — silently swallows
-    -- clicks meant for them (a click-without-drag on the widget calls Toggle(), closing the
-    -- panel). Hiding it while open removes the conflict entirely.
+    -- open panel's sidebar/tabs/buttons happen to overlap that corner (very easy once the
+    -- window's been dragged/resized toward that corner) — silently swallows clicks meant for
+    -- them (a click-without-drag on the widget calls Toggle(), closing the panel right back).
+    --
+    -- Setting Visible=false used to be deferred until the shrink-tween's Completed callback
+    -- fired, ~0.15s after opening — but the panel opens and becomes clickable immediately, so
+    -- for that whole 0.15s window the widget was still sitting there, still fully clickable,
+    -- ready to eat the very first click you made after opening. That's what caused "click a
+    -- tab right after opening → menu closes again". Active=false is instant and is what
+    -- actually stops a GuiObject from receiving/blocking input (Visible alone controls
+    -- rendering, not hit-testing during a mid-tween frame) — so it's set the moment Toggle()
+    -- runs, before any animation, closing the race entirely.
     if self._widget then
         if state then
+            self._widget.Active = false
             Tween(self._widgetScale, { Scale = 0 }, 0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.In).Completed:Connect(function()
                 if self.Visible then self._widget.Visible = false end
             end)
         else
             self._widget.Visible = true
+            self._widget.Active = true
             Tween(self._widgetScale, { Scale = 1 }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         end
     end
