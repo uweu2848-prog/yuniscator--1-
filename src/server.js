@@ -821,6 +821,73 @@ app.post('/api/nametags/leave', requireToken, (req, res) => {
     res.json({ ok: true });
 });
 
+// ── Standalone web tag editor (mois7-style) ──────────────────────────────────
+// The in-game button never lands you on the embedded editor tab anymore — it mints a
+// short-lived link (below) that the client copies to the clipboard, and the actual
+// editing happens in a real browser tab at GET /tag, talking ONLY to /api/tag-session/:code.
+// The code carries just enough auth to touch that one player's tag — never the admin key.
+const editorCodes = new Map(); // code -> { userId, username, expiresAt }
+const EDITOR_LINK_TTL_MS = 15 * 60 * 1000;
+
+function mintEditorCode(userId, username) {
+    const t = now();
+    if (editorCodes.size > 2000) for (const [c, v] of editorCodes) if (v.expiresAt < t) editorCodes.delete(c);
+    const code = crypto.randomBytes(16).toString('base64url');
+    editorCodes.set(code, { userId: String(userId), username: username || 'Unknown', expiresAt: t + EDITOR_LINK_TTL_MS });
+    return code;
+}
+
+function requireEditorCode(req, res, next) {
+    const v = editorCodes.get(req.params.code);
+    if (!v || v.expiresAt < now()) return res.status(410).json({ ok: false, error: 'This link expired — reopen the editor from the game.' });
+    v.expiresAt = now() + EDITOR_LINK_TTL_MS; // sliding expiry while they're actively editing
+    req.editorUserId = v.userId;
+    req.editorUsername = v.username;
+    next();
+}
+
+const editorLinkLimiter = rateLimit({ windowMs: 60_000, max: 12, name: 'editor-link' });
+app.post('/api/nametags/editor-link', editorLinkLimiter, requireToken, (req, res) => {
+    const code = mintEditorCode(req.who.userId, req.who.username);
+    // fragment (#), not a query string, so the code never shows up in server access logs or a Referer header
+    res.json({ ok: true, url: `${publicBase(req)}/tag#${code}`, expiresInSeconds: Math.round(EDITOR_LINK_TTL_MS / 1000) });
+});
+
+app.get('/tag', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'tag-editor.html')));
+
+app.get('/api/tag-session/:code', requireEditorCode, (req, res) => {
+    res.json({
+        ok: true,
+        username: req.editorUsername,
+        options: {
+            groups: tagconfig.GROUPS, composites: tagconfig.COMPOSITES, types: tagconfig.TYPES, fonts: tagconfig.FONTS,
+            animations: tagconfig.ANIMATIONS, defaults: tagconfig.DEFAULTS, rolePresets: tagconfig.ROLE_PRESETS,
+            colorPresets: tagconfig.PRESET_NAMES, ranges: tagconfig.RANGES,
+        },
+        tag: tagInfo(req.editorUserId),
+    });
+});
+app.put('/api/tag-session/:code', requireEditorCode, (req, res) => {
+    try { res.json({ ok: true, tag: setTagOptions(req.editorUserId, req.body) }); }
+    catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.delete('/api/tag-session/:code', requireEditorCode, (req, res) => {
+    try { res.json({ ok: true, tag: resetTag(req.editorUserId, req.query.option ? String(req.query.option) : undefined) }); }
+    catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/api/tag-session/:code/preset', requireEditorCode, (req, res) => {
+    try { res.json({ ok: true, tag: applyPreset(req.editorUserId, (req.body || {}).name) }); }
+    catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.get('/api/tag-session/:code/export', requireEditorCode, (req, res) => {
+    try { res.json({ ok: true, ...exportTag(req.editorUserId) }); }
+    catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/api/tag-session/:code/import', requireEditorCode, (req, res) => {
+    try { const b = req.body || {}; res.json({ ok: true, ...importTag(req.editorUserId, b.code, b.mode) }); }
+    catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── Admin ───────────────────────────────────────────────────────────────────
 const adminLimiter = rateLimit({ windowMs: 60_000, max: num(env.ADMIN_RATE_PER_MIN, 30), name: 'admin' }); // per IP; raise it if you script the admin API
 function requireAdmin(req, res, next) {

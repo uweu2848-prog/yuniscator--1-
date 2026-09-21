@@ -149,8 +149,12 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 --  Settings
 -- ───────────────────────────────────────────────────────────────────────────
--- Tag Editor tab (design a nametag, export a code for the Discord bot's /tag import)
-local Editor = TagEditor.Build(Window, Nametags)
+-- Tag Editor tab (design a nametag, export a code for the Discord bot's /tag import).
+-- Kept around for anyone who wants it, but "edit tag" (Settings section + HUD button
+-- below) now opens the standalone web editor instead — set SHOW_EMBEDDED_EDITOR_TAB to
+-- true if you want the in-game tab back as well.
+local SHOW_EMBEDDED_EDITOR_TAB = false
+local Editor = SHOW_EMBEDDED_EDITOR_TAB and TagEditor.Build(Window, Nametags) or { Destroy = function() end }
 
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
@@ -193,6 +197,9 @@ do
         Nametags.Refresh()
         Window:Notify("Nametags", "Refreshing…", 2)
     end)
+    sec:AddButton("Edit Nametag (Web)", function()
+        Nametags.OpenEditor()
+    end)
 end
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -214,6 +221,8 @@ Nametags.Start({
     request = ctx.request,
     server = ctx.server,
     onRevoked = function() ctx.revoke() end,
+    notify = function(title, desc, duration) Window:Notify(title, desc, duration) end,
 })
+Nametags.CreateHudButton()
 
 Window:Notify("Scorp", "Loaded. Press " .. Window.ToggleKey.Name .. " to toggle.", 4)

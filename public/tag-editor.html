@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M7 · Nametag Editor</title>
+<style>
+  :root{
+    --bg:#07050d; --panel:#100c1d; --panel-2:#150f26; --border:#2a2140;
+    --purple:#7c3aed; --purple-light:#a982ff; --text:#e9e6f5; --muted:#8f89ab;
+    --ok:#3ddc84; --err:#ff5d78;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:radial-gradient(circle at 50% -10%,#1a1030 0%,#07050d 60%);color:var(--text);
+       font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 18px 60px;}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:22px;}
+  .logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--purple),#4c1d95);
+        display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#fff;
+        box-shadow:0 0 18px rgba(124,58,237,.55);}
+  header h1{font-size:16px;margin:0;letter-spacing:.5px;}
+  header p{margin:2px 0 0;color:var(--muted);font-size:12px;}
+  #status{margin-left:auto;font-size:12px;color:var(--muted);}
+  #status.ok{color:var(--ok);} #status.err{color:var(--err);}
+
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px;}
+  .preview{display:flex;flex-direction:column;align-items:center;padding:34px 18px;position:relative;overflow:hidden;}
+  .preview-tag{display:inline-flex;align-items:center;gap:10px;padding:8px 16px;border-radius:10px;
+               border:1px solid; box-shadow:0 0 24px 0 rgba(124,58,237,.35);}
+  .preview-tag img{width:26px;height:26px;border-radius:6px;}
+  .preview-rank{font-weight:700;font-size:13px;}
+  .preview-user{font-size:11px;opacity:.85;}
+
+  nav.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+  nav.tabs button{background:var(--panel-2);border:1px solid var(--border);color:var(--muted);
+                   padding:8px 14px;border-radius:9px;font-size:12.5px;cursor:pointer;}
+  nav.tabs button.active{background:var(--purple);color:#fff;border-color:var(--purple);}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;}
+  .field label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:5px;}
+  .field input[type=text],.field input[type=number],.field select{
+    width:100%;background:#0b0816;border:1px solid var(--border);color:var(--text);
+    padding:8px 9px;border-radius:8px;font-size:13px;}
+  .field input[type=color]{width:100%;height:34px;border:1px solid var(--border);border-radius:8px;
+    background:#0b0816;padding:2px;cursor:pointer;}
+  .field.bool{display:flex;align-items:center;justify-content:space-between;
+    background:#0b0816;border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
+  .switch{width:38px;height:20px;border-radius:20px;background:#2a2140;position:relative;cursor:pointer;flex:none;}
+  .switch.on{background:var(--purple);}
+  .switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+    background:#fff;transition:left .15s;}
+  .switch.on::after{left:20px;}
+
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;}
+  button.btn{border:none;border-radius:9px;padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer;}
+  .btn-primary{background:var(--purple);color:#fff;}
+  .btn-primary:hover{background:#6d28d9;}
+  .btn-ghost{background:var(--panel-2);color:var(--text);border:1px solid var(--border);}
+  .btn-ghost:hover{border-color:var(--purple-light);}
+  select.presetSelect{background:#0b0816;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:9px;}
+
+  textarea#exportBox{width:100%;min-height:70px;background:#0b0816;border:1px solid var(--border);
+    color:var(--muted);border-radius:8px;padding:10px;font-size:11.5px;font-family:monospace;resize:vertical;}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:4px;}
+  #gate{max-width:420px;margin:80px auto;text-align:center;}
+  #gate p{color:var(--muted);font-size:13px;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app" style="display:none;">
+  <header>
+    <div class="logo">M7</div>
+    <div><h1>NAMETAG EDITOR</h1><p id="whoami">—</p></div>
+    <div id="status">connecting…</div>
+  </header>
+
+  <div class="card preview">
+    <div class="preview-tag" id="previewTag">
+      <img id="previewImg" src="" alt="">
+      <div>
+        <div class="preview-rank" id="previewRank">Member</div>
+        <div class="preview-user" id="previewUser">Username</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:14px;">
+      <label class="hint" style="margin:0;">Preset</label>
+      <select class="presetSelect" id="presetSelect"></select>
+      <button class="btn btn-ghost" id="applyPreset">Apply preset</button>
+      <button class="btn btn-ghost" id="resetAll" style="margin-left:auto;">Reset to default</button>
+    </div>
+
+    <nav class="tabs" id="tabs"></nav>
+    <div class="grid" id="fields"></div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="saveBtn">Save Tag</button>
+      <button class="btn btn-ghost" id="exportBtn">Copy Export Code</button>
+    </div>
+
+    <div style="margin-top:14px;">
+      <label class="hint">Export / import code</label>
+      <textarea id="exportBox" placeholder="SCORPTAG1.…"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn btn-ghost" id="importBtn">Import code</button>
+        <span class="hint" id="importMsg"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="gate">
+  <div class="logo" style="margin:0 auto 14px;"></div>
+  <p id="gateMsg">Open this editor from the "edit tag" button in-game — the link is copied to your clipboard automatically.</p>
+</div>
+
+<script>
+(function(){
+  const CODE = location.hash.slice(1);
+  const gate = document.getElementById('gate');
+  const app = document.getElementById('app');
+  const statusEl = document.getElementById('status');
+
+  if (!CODE) { gate.style.display = 'block'; return; }
+
+  function setStatus(text, cls){ statusEl.textContent = text; statusEl.className = cls || ''; }
+  function api(path, opts){
+    opts = opts || {};
+    return fetch('/api/tag-session/' + CODE + path, {
+      method: opts.method || 'GET',
+      headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    }).then(r => r.json().then(d => { if (!r.ok || d.ok === false) throw new Error(d.error || 'request failed'); return d; }));
+  }
+
+  let OPTIONS = null;   // groups/types/fonts/animations/defaults/rolePresets/colorPresets/ranges
+  let overrides = {};   // current stored overrides (server truth)
+  let draft = {};        // in-progress local edits, same shape as overrides
+  let effective = {};    // defaults + role preset + overrides, resolved
+  let activeGroup = 'text';
+
+  const TAB_LABELS = { text: 'Text & Font', layout: 'Images & Layout', colors: 'Colors', effects: 'Effects' };
+  const pretty = k => k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
+
+  function boot(){
+    gate.style.display = 'none';
+    app.style.display = 'block';
+    setStatus('loading…');
+    api('').then(d => {
+      OPTIONS = d.options;
+      overrides = d.tag.overrides || {};
+      draft = Object.assign({}, overrides);
+      document.getElementById('whoami').textContent = d.username + ' · ' + d.tag.roleLabel;
+      setStatus('all changes saved', 'ok');
+      buildPresets();
+      buildTabs();
+      renderFields();
+      recomputeEffective();
+    }).catch(e => setStatus(e.message, 'err'));
+  }
+
+  function buildPresets(){
+    const sel = document.getElementById('presetSelect');
+    sel.innerHTML = OPTIONS.colorPresets.map(n => `<option>${n}</option>`).join('');
+  }
+
+  function buildTabs(){
+    const tabs = document.getElementById('tabs');
+    tabs.innerHTML = '';
+    Object.keys(OPTIONS.groups).forEach(g => {
+      const b = document.createElement('button');
+      b.textContent = TAB_LABELS[g] || pretty(g);
+      b.className = g === activeGroup ? 'active' : '';
+      b.onclick = () => { activeGroup = g; buildTabs(); renderFields(); };
+      tabs.appendChild(b);
+    });
+  }
+
+  function valueFor(key){ return draft[key] !== undefined ? draft[key] : OPTIONS.defaults[key]; }
+
+  function setField(key, value){
+    if (value === OPTIONS.defaults[key]) delete draft[key]; else draft[key] = value;
+    recomputeEffective();
+    setStatus('unsaved changes');
+  }
+
+  function renderFields(){
+    const wrap = document.getElementById('fields');
+    wrap.innerHTML = '';
+    const keys = OPTIONS.groups[activeGroup] || [];
+    keys.forEach(key => {
+      const type = OPTIONS.types[key];
+      const field = document.createElement('div');
+      field.className = 'field' + (type === 'bool' ? ' bool' : '');
+      const val = valueFor(key);
+
+      if (type === 'bool') {
+        field.innerHTML = `<label>${pretty(key)}</label>`;
+        const sw = document.createElement('div');
+        sw.className = 'switch' + (val ? ' on' : '');
+        sw.onclick = () => { const nv = !valueFor(key); sw.className = 'switch' + (nv ? ' on' : ''); setField(key, nv); };
+        field.appendChild(sw);
+      } else if (type === 'color') {
+        field.innerHTML = `<label>${pretty(key)}</label><input type="color" value="${val}">`;
+        field.querySelector('input').oninput = e => setField(key, e.target.value);
+      } else if (type === 'font') {
+        field.innerHTML = `<label>${pretty(key)}</label><select>${OPTIONS.fonts.map(f => `<option ${f===val?'selected':''}>${f}</option>`).join('')}</select>`;
+        field.querySelector('select').onchange = e => setField(key, e.target.value);
+      } else if (type === 'enum') {
+        field.innerHTML = `<label>${pretty(key)}</label><select>${OPTIONS.animations.map(a => `<option ${a===val?'selected':''}>${a}</option>`).join('')}</select>`;
+        field.querySelector('select').onchange = e => setField(key, e.target.value);
+      } else if (type === 'int' || type === 'float') {
+        const range = OPTIONS.ranges[key] || [];
+        field.innerHTML = `<label>${pretty(key)}</label><input type="number" value="${val}" ${range.length?`min="${range[0]}" max="${range[1]}"`:''} ${type==='float'?'step="0.1"':''}>`;
+        field.querySelector('input').oninput = e => setField(key, type === 'int' ? parseInt(e.target.value||0,10) : parseFloat(e.target.value||0));
+      } else { // text / asset
+        field.innerHTML = `<label>${pretty(key)}${type==='asset'?' (asset id, or blank)':''}</label><input type="text" value="${val ?? ''}">`;
+        field.querySelector('input').oninput = e => setField(key, e.target.value);
+      }
+      wrap.appendChild(field);
+    });
+  }
+
+  function recomputeEffective(){
+    effective = Object.assign({}, OPTIONS.defaults, draft);
+    document.getElementById('previewRank').textContent = effective.label || 'Member';
+    document.getElementById('previewUser').textContent = effective.userText === 'auto' ? document.getElementById('whoami').textContent.split(' · ')[0] : (effective.userText || '');
+    const tagEl = document.getElementById('previewTag');
+    tagEl.style.background = `linear-gradient(180deg, ${effective.backgroundColorA}, ${effective.backgroundColorC})`;
+    tagEl.style.borderColor = effective.outlineColorA;
+    document.getElementById('previewRank').style.color = effective.primary;
+    document.getElementById('previewUser').style.color = effective.nameColor;
+    const img = document.getElementById('previewImg');
+    img.style.display = effective.image ? 'block' : 'none';
+    if (effective.image) img.src = 'https://www.roblox.com/asset-thumbnail/image?assetId=' + effective.image.replace('rbxassetid://','') + '&width=60&height=60&format=png';
+  }
+
+  document.getElementById('applyPreset').onclick = () => {
+    api('/preset', { method: 'POST', body: { name: document.getElementById('presetSelect').value } })
+      .then(d => { overrides = d.tag.overrides; draft = Object.assign({}, overrides); renderFields(); recomputeEffective(); setStatus('preset applied', 'ok'); })
+      .catch(e => setStatus(e.message, 'err'));
+  };
+
+  document.getElementById('resetAll').onclick = () => {
+    if (!confirm('Reset your whole nametag design back to default?')) return;
+    api('', { method: 'DELETE' })
+      .then(d => { overrides = d.tag.overrides; draft = {}; renderFields(); recomputeEffective(); setStatus('reset', 'ok'); })
+      .catch(e => setStatus(e.message, 'err'));
+  };
+
+  document.getElementById('saveBtn').onclick = () => {
+    const changed = {};
+    // only send keys that differ from what the server already has, or that were reset to default
+    const keys = new Set([...Object.keys(draft), ...Object.keys(overrides)]);
+    keys.forEach(k => { if (draft[k] !== overrides[k]) changed[k] = draft[k] === undefined ? 'default' : draft[k]; });
+    if (!Object.keys(changed).length) { setStatus('all changes saved', 'ok'); return; }
+    setStatus('saving…');
+    api('', { method: 'PUT', body: changed })
+      .then(d => { overrides = d.tag.overrides; draft = Object.assign({}, overrides); setStatus('all changes saved', 'ok'); })
+      .catch(e => setStatus(e.message, 'err'));
+  };
+
+  document.getElementById('exportBtn').onclick = () => {
+    api('/export').then(d => {
+      document.getElementById('exportBox').value = d.code;
+      navigator.clipboard && navigator.clipboard.writeText(d.code).catch(()=>{});
+    }).catch(e => setStatus(e.message, 'err'));
+  };
+
+  document.getElementById('importBtn').onclick = () => {
+    const code = document.getElementById('exportBox').value.trim();
+    if (!code) return;
+    api('/import', { method: 'POST', body: { code, mode: 'replace' } })
+      .then(d => {
+        overrides = d.info.overrides; draft = Object.assign({}, overrides);
+        renderFields(); recomputeEffective();
+        document.getElementById('importMsg').textContent = `applied ${d.applied} option(s)`;
+        setStatus('imported', 'ok');
+      })
+      .catch(e => setStatus(e.message, 'err'));
+  };
+
+  boot();
+})();
+</script>
+</body>
+</html>

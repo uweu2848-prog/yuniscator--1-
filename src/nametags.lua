@@ -844,6 +844,163 @@ function Nametags.PreviewCard(parent, overrides, role)
     return nil
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  STANDALONE WEB EDITOR  (mois7-style: opens as a real browser tab, not an
+--  in-game one — the executor can't launch a browser itself, so this mints a
+--  short-lived link and copies it to the clipboard, same trick mois7 uses)
+-- ═══════════════════════════════════════════════════════════════════════════
+local function copyToClipboard(text)
+    local fn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+    if type(fn) ~= "function" then return false end
+    return (pcall(fn, text))
+end
+
+--- callback(url) on success, callback(nil, err) on failure. Never blocks the caller.
+function Nametags.RequestEditorLink(callback)
+    if not cfg then callback(nil, "not connected") return end
+    task.spawn(function()
+        local ok, res = pcall(cfg.request, {
+            Url = cfg.server .. "/api/nametags/editor-link",
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["Authorization"] = "Bearer " .. tostring(cfg.ctx.token),
+            },
+            Body = "{}",
+        })
+        if not ok or type(res) ~= "table" or res.StatusCode ~= 200 or not res.Body then
+            callback(nil, "couldn't reach the server")
+            return
+        end
+        local decoded, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+        if not decoded or type(data) ~= "table" or not data.url then
+            callback(nil, "bad response")
+            return
+        end
+        callback(data.url)
+    end)
+end
+
+--- Gets a link and copies it to the clipboard, then notifies the player.
+function Nametags.OpenEditor()
+    Nametags.RequestEditorLink(function(url, err)
+        if not (cfg and cfg.notify) then return end
+        if not url then
+            cfg.notify("Nametag", "Couldn't get an editor link — " .. tostring(err), 4)
+        elseif copyToClipboard(url) then
+            cfg.notify("Nametag", "Editor link copied — paste it into your browser.", 5)
+        else
+            cfg.notify("Nametag", "Your executor can't copy text. Editor link: " .. url, 10)
+        end
+    end)
+end
+
+-- ── HUD button: small "M7" pill in a corner, pops a card with hide/edit tag ──
+-- Mirrors mois7's own nametag popup — "edit tag" opens the standalone web editor above.
+local hud = nil
+function Nametags.CreateHudButton()
+    if hud then return end
+    -- Button/click events aren't guaranteed everywhere (e.g. a headless test harness),
+    -- so this never takes the rest of the script down with it.
+    local ok, err = pcall(Nametags._buildHudButton)
+    if not ok then warn("[Scorp] couldn't create the nametag HUD button: " .. tostring(err)) end
+end
+
+function Nametags._buildHudButton()
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ScorpNametagHud"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 999
+    gui.Parent = (gethui and gethui()) or CoreGui
+
+    local pill = Instance.new("TextButton")
+    pill.Name = "Pill"
+    pill.Size = UDim2.new(0, 44, 0, 28)
+    pill.Position = UDim2.new(1, -60, 0, 12)
+    pill.BackgroundColor3 = Color3.fromRGB(13, 10, 22)
+    pill.Text = "M7"
+    pill.TextColor3 = Color3.fromRGB(168, 130, 255)
+    pill.Font = Enum.Font.GothamBold
+    pill.TextSize = 14
+    pill.AutoButtonColor = false
+    pill.Parent = gui
+    local pillCorner = Instance.new("UICorner"); pillCorner.CornerRadius = UDim.new(0, 8); pillCorner.Parent = pill
+    local pillStroke = Instance.new("UIStroke"); pillStroke.Color = Color3.fromRGB(120, 90, 220); pillStroke.Transparency = 0.5; pillStroke.Parent = pill
+
+    local card = Instance.new("Frame")
+    card.Name = "Card"
+    card.Size = UDim2.new(0, 240, 0, 132)
+    card.Position = UDim2.new(1, -60, 0, 46)
+    card.AnchorPoint = Vector2.new(1, 0)
+    card.BackgroundColor3 = Color3.fromRGB(15, 12, 26)
+    card.Visible = false
+    card.Parent = gui
+    local cardCorner = Instance.new("UICorner"); cardCorner.CornerRadius = UDim.new(0, 12); cardCorner.Parent = card
+    local cardStroke = Instance.new("UIStroke"); cardStroke.Color = Color3.fromRGB(90, 70, 160); cardStroke.Transparency = 0.4; cardStroke.Parent = card
+
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.new(0, 16, 0, 12)
+    title.Size = UDim2.new(1, -32, 0, 18)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 13
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.TextColor3 = Color3.fromRGB(168, 130, 255)
+    title.Text = "NAMETAG"
+    title.Parent = card
+
+    local subtitle = Instance.new("TextLabel")
+    subtitle.BackgroundTransparency = 1
+    subtitle.Position = UDim2.new(0, 16, 0, 32)
+    subtitle.Size = UDim2.new(1, -32, 0, 36)
+    subtitle.Font = Enum.Font.Gotham
+    subtitle.TextSize = 12
+    subtitle.TextWrapped = true
+    subtitle.TextXAlignment = Enum.TextXAlignment.Left
+    subtitle.TextColor3 = Color3.fromRGB(180, 180, 195)
+    subtitle.Text = "hide your local tag or open the editor?"
+    subtitle.Parent = card
+
+    local function makeBtn(text, xScale, xOffset, primary)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0.5, -20, 0, 32)
+        b.Position = UDim2.new(xScale, xOffset, 1, -44)
+        b.BackgroundColor3 = primary and Color3.fromRGB(124, 58, 237) or Color3.fromRGB(30, 26, 46)
+        b.Text = text
+        b.Font = Enum.Font.GothamMedium
+        b.TextSize = 13
+        b.TextColor3 = Color3.fromRGB(240, 240, 250)
+        b.AutoButtonColor = false
+        b.Parent = card
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 8); c.Parent = b
+        return b
+    end
+
+    local hideBtn = makeBtn("hide tag", 0, 16, false)
+    local editBtn = makeBtn("edit tag", 0.5, -4, true)
+
+    local open = false
+    local function setOpen(v)
+        open = v
+        card.Visible = v
+    end
+
+    pill.MouseButton1Click:Connect(function() setOpen(not open) end)
+    hideBtn.MouseButton1Click:Connect(function()
+        S.ShowSelf = not S.ShowSelf
+        hideBtn.Text = S.ShowSelf and "hide tag" or "show tag"
+        render()
+        setOpen(false)
+    end)
+    editBtn.MouseButton1Click:Connect(function()
+        setOpen(false)
+        Nametags.OpenEditor()
+    end)
+
+    hud = gui
+end
+
 function Nametags.Stop()
     if not running and not cfg then return end
     running = false
@@ -852,6 +1009,7 @@ function Nametags.Stop()
     for userId in pairs(tags) do removeTag(userId) end
     roster = {}
     if holder then pcall(function() holder:Destroy() end) holder = nil end
+    if hud then pcall(function() hud:Destroy() end) hud = nil end
     if c then
         pcall(c.request, {
             Url = c.server .. "/api/nametags/leave",
