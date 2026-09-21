@@ -732,6 +732,8 @@ function Library:CreateWindow(opts)
         self:_drag(w, w, function() self:_play("Click"); self:Toggle() end)
         Tween(ws, { Scale = 1 }, 0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         self._widget = w
+        self._widgetScale = ws
+        w.Visible = not self.Visible -- only needed to *reopen* a closed panel; see Toggle() below
     end
 
     -- ── Global keys ──
@@ -772,6 +774,22 @@ function Window:Toggle(state)
     if self.Destroyed then return end
     if state == nil then state = not self.Visible end
     self.Visible = state
+    -- The floating widget only exists to reopen a *closed* panel. Left visible while the
+    -- panel is open, it sits at a fixed screen corner with a high ZIndex and — whenever the
+    -- open panel's sidebar/tabs/buttons happen to overlap that corner — silently swallows
+    -- clicks meant for them (a click-without-drag on the widget calls Toggle(), closing the
+    -- panel). Hiding it while open removes the conflict entirely.
+    if self._widget then
+        if state then
+            Tween(self._widgetScale, { Scale = 0 }, 0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.In).Completed:Connect(function()
+                if self.Visible then self._widget.Visible = false end
+            end)
+        else
+            self._widget.Visible = true
+            Tween(self._widgetScale, { Scale = 1 }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        end
+    end
+
     if state then
         self.Main.Visible = true
         if self.Blur then Tween(self.Blur, { Size = self.BlurSize }, 0.35) end
