@@ -16,6 +16,7 @@
   },
   "license": "ISC",
   "dependencies": {
+    "discord.js": "^14.27.0",
     "express": "^5.2.1",
     "luaparse": "^0.3.1"
   }

@@ -104,6 +104,28 @@ live" has a real answer.
 - In-game, the Settings tab has a **Preview Style** dropdown so you can
   see any role's look on your own tag without asking someone else to
   log in.
+- Roles can also be set from Discord instead of `curl` — see the
+  **Discord bot** section below.
+
+## Discord bot (optional)
+
+Set `DISCORD_TOKEN` in `.env` (see the comments there for how to get one)
+and the server starts a bot alongside itself with one slash command:
+
+- `/nametag set roblox_id:<id> role:<role> [label:<text>]` — same as the
+  `PUT /api/admin/roles/:userId` call above, just from Discord
+- `/nametag clear roblox_id:<id>` — reset back to the default role
+- `/nametag list` — everyone with a custom role right now
+
+It's the same process, same `data/roles.json`, same validation as the
+HTTP admin route — this is just another way to call it. Leave
+`DISCORD_TOKEN` blank and the server runs exactly as before.
+
+By default only people listed in `STAFF_DISCORD_IDS` can use it; if
+that's left blank, anyone with Administrator in the Discord server it's
+run from can. Set `DISCORD_GUILD_ID` too and the command appears
+instantly in that one server instead of waiting up to an hour for a
+global slash-command sync.
 
 ## Anti-tamper
 

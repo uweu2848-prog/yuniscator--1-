@@ -53,6 +53,10 @@ const CONFIG = {
     OWNER_USER_ID: String(env.OWNER_USER_ID || '').trim(),
     OWNER_KEY: env.OWNER_KEY || '',
     ADMIN_PASSWORD: env.ADMIN_PASSWORD || '',
+    DISCORD_TOKEN: (env.DISCORD_TOKEN || '').trim(),
+    DISCORD_CLIENT_ID: (env.DISCORD_CLIENT_ID || '').trim(),
+    DISCORD_GUILD_ID: (env.DISCORD_GUILD_ID || '').trim(), // optional: instant slash-command sync to one server
+    STAFF_DISCORD_IDS: (env.STAFF_DISCORD_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
     DATA_DIR: env.DATA_DIR ? path.resolve(env.DATA_DIR) : path.join(ROOT, 'data'),
     SESSION_SECRET: env.SESSION_SECRET || '',
     TRUST_PROXY_HOPS: num(env.TRUST_PROXY_HOPS, 1), // Railway = 1 proxy hop. NEVER use `true`: clients could forge X-Forwarded-For.
@@ -769,21 +773,41 @@ app.post('/api/admin/unblacklist', (req, res) => {
     res.json({ success: true, message: `Lifted ban for ${target}` });
 });
 
+// Shared by the HTTP admin routes below AND the optional Discord bot (src/discord-bot.js),
+// so both ways of changing a role go through the exact same validation and write to the
+// exact same store that /api/nametags/sync reads from.
+function setRole(userId, role, label) {
+    userId = String(userId);
+    role = String(role || '').toLowerCase();
+    if (!isDigits(userId) || !ROLES.includes(role)) {
+        throw new Error(`userId must be numeric and role one of: ${ROLES.join(', ')}`);
+    }
+    label = cleanStr(label, 24) || DEFAULT_LABEL[role];
+    roles[userId] = { role, label, updatedAt: new Date().toISOString() };
+    saveRoles();
+    return { userId, ...roles[userId] };
+}
+
+function clearRole(userId) {
+    userId = String(userId);
+    const had = userId in roles;
+    delete roles[userId];
+    saveRoles();
+    return had;
+}
+
 app.get('/api/admin/roles', (_req, res) => res.json({ roles, available: ROLES }));
 
 app.put('/api/admin/roles/:userId', (req, res) => {
-    const userId = req.params.userId;
-    const role = String((req.body || {}).role || '').toLowerCase();
-    if (!isDigits(userId) || !ROLES.includes(role)) return res.status(400).json({ error: `userId must be numeric and role one of: ${ROLES.join(', ')}` });
-    const label = cleanStr((req.body || {}).label, 24) || DEFAULT_LABEL[role];
-    roles[userId] = { role, label, updatedAt: new Date().toISOString() };
-    saveRoles();
-    res.json({ userId, ...roles[userId] });
+    try {
+        res.json(setRole(req.params.userId, (req.body || {}).role, (req.body || {}).label));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
 });
 
 app.delete('/api/admin/roles/:userId', (req, res) => {
-    delete roles[req.params.userId];
-    saveRoles();
+    clearRole(req.params.userId);
     res.json({ ok: true });
 });
 
@@ -811,11 +835,38 @@ process.on('unhandledRejection', e => console.error('[server] unhandled rejectio
 // ────────────────────────────────────────────────────────────────────────────
 // Start
 // ────────────────────────────────────────────────────────────────────────────
+// ── Discord bot (optional) ───────────────────────────────────────────────────
+// Lets staff run /nametag set|clear|list from Discord instead of hitting the HTTP
+// admin API by hand. Runs in this same process and calls setRole/clearRole directly
+// (no network hop, no need to hand the bot the admin key). Only starts if a bot
+// token is configured; the rest of the server works fine without it.
+function startDiscordBotIfConfigured() {
+    if (!CONFIG.DISCORD_TOKEN) return null;
+    try {
+        const startDiscordBot = require('./discord-bot');
+        return startDiscordBot({
+            token: CONFIG.DISCORD_TOKEN,
+            clientId: CONFIG.DISCORD_CLIENT_ID,
+            guildId: CONFIG.DISCORD_GUILD_ID,
+            staffIds: CONFIG.STAFF_DISCORD_IDS,
+            roleNames: ROLES,
+            setRole,
+            clearRole,
+            getRoles: () => roles,
+            log,
+        });
+    } catch (e) {
+        log(`[discord-bot] failed to start: ${e.message}`);
+        return null;
+    }
+}
+
 function start() {
     const b = ensureBuilt(true);
     const server = app.listen(CONFIG.PORT, () => {
         log(`Scorp server listening on :${CONFIG.PORT}  payload=${b ? b.id : 'NOT BUILT'}  data=${CONFIG.DATA_DIR}`);
         checkWebhookAtStartup();
+        startDiscordBotIfConfigured();
     });
     return server;
 }
