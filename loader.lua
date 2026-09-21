@@ -1,68 +1,80 @@
+-- ───────────────────────────────────────────────────────────────────────────
+--  Scorp loader
+--
+--  Users run ONE line (your server hands out this file, already obfuscated,
+--  with its own address filled in):
+--
+--      loadstring(game:HttpGet("https://YOUR-SERVER/loader.lua"))()
+--
+--  Owner: run this first so you are never banned by your own anti-tamper
+--  (the key is the OWNER_KEY variable on the server; never put it in a script
+--  you share):
+--
+--      getgenv().SCORP_OWNER_KEY = "your-owner-key"
+--
+--  What it does
+--    1. runs the anti-tamper checks
+--    2. POSTs /api/session  → gets a session token, the built payload and the UI library
+--    3. runs the payload, handing it a context table (token, request fn, …)
+--    4. every ~30 s: re-runs the checks and POSTs /api/heartbeat.
+--       The server sees a heartbeat = "this session is really running".
+--       A session that fetched the payload but never heartbeats is reported to
+--       Discord as a possible dump. 403 = revoked → the UI is torn down.
+--
+--  Anti-tamper codes (only these codes are sent, never readable text):
+--    C1  core Lua functions (pcall, error, tostring…) replaced by Lua closures
+--    H1  the executor's request function is a Lua wrapper instead of native
+--    H2  request / loadstring reference changed since the loader started
+--    H3  game.HttpGet replaced by a Lua wrapper
+--    M1  game's __namecall / __index metamethods hooked with Lua closures
+--    G1  a GUI named like an HTTP spy is sitting in CoreGui / gethui()
+--    G2  a well-known spy global exists in _G / shared / getgenv()
+--
+--  These checks are best-effort. A careful attacker can defeat any client-side
+--  check; the server-side signals (never-confirmed sessions, IP correlation,
+--  rate limits) are what catch the rest.
+-- ───────────────────────────────────────────────────────────────────────────
+
+local SERVER_URL = "__SERVER_URL__"
+
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- Replace this with your live backend server URL once deployed (or http://localhost:3000 for local testing)
-local SERVER_URL = "https://sliver-surfer-test-production.up.railway.app"
+if SERVER_URL:sub(1, 4) ~= "http" then
+    warn("[Loader] this file must be downloaded from your server (/loader.lua), not from GitHub.")
+    return
+end
 
--- Cross-executor HTTP request handler
-local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+local function pickRequest()
+    return (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+end
 
+local requestFunc = pickRequest()
 local capturedRequest, capturedLoadstring = requestFunc, loadstring
-local SESSION_ID = HttpService:GenerateGUID(false)
+
+if not requestFunc or not capturedLoadstring then
+    warn("[Loader] your executor doesn't support HTTP requests / loadstring.")
+    return
+end
 
 local function getHWID()
-    local success, result = pcall(function()
+    local ok, result = pcall(function()
         return game:GetService("RbxAnalyticsService"):GetClientId()
     end)
-    return success and result or "UNKNOWN_HWID"
+    return ok and result or "UNKNOWN_HWID"
 end
 
-local HEADERS = {
-    ["X-User-ID"] = tostring(LocalPlayer.UserId),
-    ["X-HWID"]    = getHWID(),
-    ["X-Session"] = SESSION_ID,
-}
-
-local function reportTamper(reason)
-    if not requestFunc then return end
-    pcall(function()
-        requestFunc({
-            Url = SERVER_URL .. "/api/tamper",
-            Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode({
-                userId = tostring(LocalPlayer.UserId),
-                username = LocalPlayer.Name,
-                hwid = getHWID(),
-                reason = reason,
-                session = SESSION_ID,
-            })
-        })
-    end)
-end
+local OWNER_KEY = nil
+pcall(function() OWNER_KEY = getgenv().SCORP_OWNER_KEY end)
 
 -- ───────────────────────────────────────────────────────────────────────────
---  Anti-tamper detection
---  Each check has an opaque code + a weight. Only the codes are sent to the
---  server, so nothing readable shows up in a spy log.
---
---    C1  core Lua functions (pcall, error, tostring...) replaced by Lua closures
---    H1  the executor's request function is a Lua wrapper instead of native
---    H2  request / loadstring reference changed since the script started
---    H3  game.HttpGet replaced by a Lua wrapper
---    M1  game's __namecall / __index metamethods hooked with Lua closures
---    G1  a GUI named like an HTTP spy is sitting in CoreGui / gethui()
---
---  Score = sum of weights. Start with BLOCK_SCORE = math.huge (report only),
---  watch your logs for false positives on the executors you support, then
---  lower it.
+--  Anti-tamper checks
 -- ───────────────────────────────────────────────────────────────────────────
-local REPORT_SCORE    = 1          -- report to /api/tamper at or above this
-local BLOCK_SCORE     = math.huge  -- refuse to run locally at or above this (try 3 once tuned)
-local HEARTBEAT_EVERY = 60         -- seconds between re-checks / revocation checks
+local BLOCK_SCORE = math.huge  -- local refusal. Leave at math.huge (server-side bans only) until your logs show no false positives.
 
-local SPY_NAMES = { "httpspy", "http spy", "simplespy", "hookspy", "networkspy" }  -- extend as you find more
+local SPY_NAMES = { "httpspy", "http spy", "simplespy", "hookspy", "networkspy" }
+local SPY_GLOBALS = { "HttpSpy", "httpspy", "SimpleSpy", "SimpleSpyExecuted", "hookedRequest" }
 
 -- True if fn is a native / C closure. Returns true when it can't tell (avoids false positives).
 local function isNative(fn)
@@ -80,9 +92,24 @@ local function guiHasSpy(container)
     local ok, kids = pcall(function() return container:GetChildren() end)
     if not ok then return false end
     for _, c in ipairs(kids) do
-        local n = c.Name:lower()
+        local n = string.lower(c.Name)
         for _, bad in ipairs(SPY_NAMES) do
-            if n:find(bad, 1, true) then return true end
+            if string.find(n, bad, 1, true) then return true end
+        end
+    end
+    return false
+end
+
+local function hasSpyGlobal()
+    local envs = { _G, shared }
+    if getgenv then
+        local ok, g = pcall(getgenv)
+        if ok and type(g) == "table" then envs[#envs + 1] = g end
+    end
+    for _, e in ipairs(envs) do
+        for _, name in ipairs(SPY_GLOBALS) do
+            local ok, v = pcall(rawget, e, name)
+            if ok and v ~= nil then return true end
         end
     end
     return false
@@ -95,15 +122,14 @@ local function runChecks()
         score = score + weight
     end
 
-    local core = { pcall, error, tostring, type, select, rawget, setmetatable, print, warn }
+    local core = { pcall, error, tostring, type, select, rawget, setmetatable }
     for _, fn in ipairs(core) do
         if not isNative(fn) then hit("C1", 2) break end
     end
 
-    if requestFunc and not isNative(requestFunc) then hit("H1", 1) end
+    if not isNative(requestFunc) then hit("H1", 1) end
 
-    local nowRequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if nowRequest ~= capturedRequest or loadstring ~= capturedLoadstring then hit("H2", 3) end
+    if pickRequest() ~= capturedRequest or loadstring ~= capturedLoadstring then hit("H2", 3) end
 
     local okHG, httpGet = pcall(function() return game.HttpGet end)
     if okHG and httpGet and not isNative(httpGet) then hit("H3", 1) end
@@ -121,88 +147,125 @@ local function runChecks()
     local okCG, coreGui = pcall(function() return game:GetService("CoreGui") end)
     if (okCG and guiHasSpy(coreGui)) or (gethui and guiHasSpy(gethui())) then hit("G1", 2) end
 
+    if hasSpyGlobal() then hit("G2", 2) end
+
     return hits, score
 end
 
-local reported = {}
-local function reportHits(hits, score)
-    local key = table.concat(hits, ",")
-    if key == "" or reported[key] then return end
-    reported[key] = true
-    reportTamper(("codes=%s score=%d session=%s"):format(key, score, SESSION_ID))
-end
-
 -- ───────────────────────────────────────────────────────────────────────────
---  Run checks, then fetch & execute the payload
+--  Server calls
 -- ───────────────────────────────────────────────────────────────────────────
-if not requestFunc then
-    warn("[Loader] your executor doesn't support HTTP requests.")
-    return
-end
-
-local hits, score = runChecks()
-if score >= REPORT_SCORE then reportHits(hits, score) end
-HEADERS["X-Flags"] = table.concat(hits, ",")
-
-if score >= BLOCK_SCORE then
-    warn("[Loader] connection refused by server.")
-    return
-end
-
-local ok, response = pcall(function()
-    return requestFunc({
-        Url = SERVER_URL .. "/api/script",
-        Method = "GET",
-        Headers = HEADERS,
+local function call(path, body, token)
+    local headers = { ["Content-Type"] = "application/json" }
+    if token then headers["Authorization"] = "Bearer " .. token end
+    local ok, res = pcall(requestFunc, {
+        Url = SERVER_URL .. path,
+        Method = "POST",
+        Headers = headers,
+        Body = HttpService:JSONEncode(body),
     })
-end)
+    if not ok or type(res) ~= "table" then return nil end
+    return res
+end
 
-if not (ok and response and response.Body) then
-    warn("[Loader] connection refused by server.")
+local function decode(res)
+    if not res or not res.Body then return nil end
+    local ok, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+    if ok and type(data) == "table" then return data end
+    return nil
+end
+
+local function identity(extra)
+    local t = {
+        userId = tostring(LocalPlayer.UserId),
+        username = LocalPlayer.Name,
+        hwid = getHWID(),
+        placeId = game.PlaceId,
+        jobId = game.JobId,
+        ownerKey = OWNER_KEY,
+    }
+    for k, v in pairs(extra) do t[k] = v end
+    return t
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Start
+-- ───────────────────────────────────────────────────────────────────────────
+local hits, score = runChecks()
+if score >= BLOCK_SCORE then
+    warn("[Loader] environment check failed.")
     return
 end
 
-local func, err = capturedLoadstring(response.Body)
-if not func then
-    warn("Failed to load execution stream.")
+local res = call("/api/session", identity({ flags = hits }))
+if not res then
+    warn("[Loader] couldn't reach the server.")
+    return
+end
+if res.StatusCode == 429 then
+    warn("[Loader] slow down — wait a few seconds and run it again.")
+    return
+end
+local data = decode(res)
+if res.StatusCode ~= 200 or not data or not data.ok or type(data.payload) ~= "string" then
+    warn("[Loader] connection refused by server (" .. tostring(res.StatusCode) .. ").")
     return
 end
 
-local ranOk, runErr = pcall(func)
+local payloadFn, compileErr = capturedLoadstring(data.payload)
+if not payloadFn then
+    warn("[Loader] failed to load payload: " .. tostring(compileErr))
+    return
+end
+
+local ctx = {
+    token = data.token,
+    server = SERVER_URL,
+    request = requestFunc,
+    loadstring = capturedLoadstring,
+    lib = data.lib,
+}
+
+local ranOk, runErr = pcall(payloadFn, ctx)
 if not ranOk then
     warn("[Loader] payload error: " .. tostring(runErr))
 end
 
 -- ───────────────────────────────────────────────────────────────────────────
---  Heartbeat: re-run the checks and let the server revoke access mid-session.
---  The server should return 401/403 for blacklisted users.
+--  Heartbeat: re-check, report, and let the server revoke access mid-session
 -- ───────────────────────────────────────────────────────────────────────────
+if not ctx.token then return end -- stalled (banned) session: nothing to check in
+
+local function revoke()
+    warn("[Loader] session revoked.")
+    if ctx.revoke then pcall(ctx.revoke) end
+end
+
 task.spawn(function()
+    local interval = tonumber(data.hb) or 30
+    task.wait(2) -- first check-in quickly, so the server knows this session is alive
     while true do
-        task.wait(HEARTBEAT_EVERY)
-
         local hb, hbScore = runChecks()
-        if hbScore >= REPORT_SCORE then reportHits(hb, hbScore) end
+        local r = call("/api/heartbeat", { flags = hb }, ctx.token)
+        local status = r and r.StatusCode
 
-        local hbOk, hbRes = pcall(function()
-            return requestFunc({
-                Url = SERVER_URL .. "/api/heartbeat",
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json",
-                    ["X-User-ID"]    = HEADERS["X-User-ID"],
-                    ["X-HWID"]       = HEADERS["X-HWID"],
-                    ["X-Session"]    = SESSION_ID,
-                },
-                Body = HttpService:JSONEncode({ flags = hb, score = hbScore }),
-            })
-        end)
-
-        local revoked = (hbOk and hbRes and (hbRes.StatusCode == 401 or hbRes.StatusCode == 403))
-            or hbScore >= BLOCK_SCORE
-        if revoked then
-            warn("[Loader] session revoked.")
+        if status == 403 or hbScore >= BLOCK_SCORE then
+            revoke()
             break
+        elseif status == 401 then
+            -- token expired, or the server restarted with a new secret: quietly get a new one
+            local rr = call("/api/session", identity({ flags = hb, resume = true }))
+            local d2 = decode(rr)
+            if rr and rr.StatusCode == 200 and d2 and d2.ok then
+                if d2.token then
+                    ctx.token = d2.token
+                else
+                    revoke()
+                    break
+                end
+            end
         end
+
+        task.wait(interval)
     end
 end)
