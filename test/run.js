@@ -18,6 +18,7 @@ const { spawn, spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const obf = require('../obfuscate');
 const luaparse = require('luaparse');
+const tagconfig = require('../src/tagconfig');
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -73,6 +74,7 @@ async function startServer(discordPort, extraEnv = {}) {
         SESSION_COOLDOWN_MS: '1200',
         UNCONFIRMED_AFTER_SECONDS: '1',
         WATCHER_INTERVAL_MS: '300',
+        ADMIN_RATE_PER_MIN: '2000',
         ...extraEnv,
     };
     const child = spawn(process.execPath, [path.join(ROOT, 'src', 'server.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -259,6 +261,62 @@ async function testServer(d) {
         const clientCannotSetRole = await post(base, '/api/nametags/sync', { jobId: 'J1', role: 'owner', label: 'HAX' }, bearer(tok.C));
         ok(!clientCannotSetRole.json.users.some(u => u.label === 'HAX'), 'a client cannot pick its own role');
 
+        section('Custom tag designs (admin API + sync)');
+        const tagUrl = id => `${base}/api/admin/tags/${id}`;
+        const putTag = (id, body, headers = admin) => fetch(tagUrl(id), { method: 'PUT', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+        ok((await putTag(A.userId, { primary: '#ff8800' }, {})).status === 403, 'designing a tag needs the admin key');
+        const t1 = await putTag(A.userId, { primary: '#FF8800', glow: 'off', userText: 'none', label: 'Cosmic Herald', fullSize: '168x34', distances: '12/20/10000', image: '1270554045585765' });
+        const t1j = await t1.json();
+        ok(t1.status === 200 && t1j.effective.primary === '#ff8800' && t1j.effective.glow === false && t1j.effective.fullWidth === 168, 'admin can set colours, effects and layout in one call', t1j.error);
+        ok(t1j.hasCustomTag && t1j.effective.image === 'rbxassetid://1270554045585765' && t1j.effective.label === 'Cosmic Herald', 'asset ids are normalised and the label override wins');
+        const badTag = await putTag(A.userId, { primary: 'nope' });
+        ok(badTag.status === 400 && /colour/.test((await badTag.json()).error), 'a bad colour is rejected with a readable message');
+        ok((await putTag(A.userId, { primary: '#00ff00', distances: '30/20/10' })).status === 400 && (await (await fetch(tagUrl(A.userId), { headers: admin })).json()).overrides.primary === '#ff8800', 'a rejected change is all-or-nothing (nothing half-applied)');
+        ok((await putTag('abc', { glow: 'on' })).status === 400, 'non-numeric user id rejected');
+        await sleep(2100);
+        const withTag = await post(base, '/api/nametags/sync', { jobId: 'J1', displayName: 'Ali' }, bearer(tok.A));
+        const alice = (withTag.json.users || []).find(u => u.username === 'Alice');
+        ok(alice && alice.label === 'Cosmic Herald' && alice.tag && alice.tag.primary === '#ff8800' && alice.tag.userText === 'none', 'sync sends only the changed options (sparse) + resolved label', alice);
+        ok(alice && !('effective' in alice) && Object.keys(alice.tag).length < 25, 'sync payload stays small (no full config per player)');
+        const themed = await (await putTag(A.userId, { theme: '#33aaff' })).json();
+        ok(themed.effective.accentA === '#33aaff' && themed.overrides.label === 'Cosmic Herald', 'theme repaints colours without touching other options');
+        const opts = await (await fetch(`${base}/api/admin/tags/options`, { headers: admin })).json();
+        ok(opts.groups.colors.length === 29 && opts.animations.includes('wave') && opts.defaults.rankFont === 'GothamBold', 'options endpoint lists every option + defaults');
+        // export / import / preset over HTTP
+        const expNone = await fetch(`${tagUrl(C.userId)}/export`, { headers: admin });
+        ok(expNone.status === 400, 'exporting a player with no design is a readable 400');
+        await putTag(C.userId, { label: 'Export Me', primary: '#12ab34', glow: 'off' });
+        const exp = await (await fetch(`${tagUrl(C.userId)}/export`, { headers: admin })).json();
+        ok(/^SCORPTAG1\./.test(exp.code) && exp.options === 3, 'GET …/export returns a SCORPTAG1 code', exp);
+        ok((await fetch(`${tagUrl(C.userId)}/export`)).status === 403, 'export needs the admin key');
+        const importPost = (id, body, headers = admin) => fetch(`${tagUrl(id)}/import`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+        const imp1 = await importPost(B.userId, { code: exp.code });
+        const imp1j = await imp1.json();
+        ok(imp1.status === 200 && imp1j.info.effective.label === 'Export Me' && imp1j.info.effective.primary === '#12ab34' && imp1j.applied === 3, 'POST …/import applies a code to another player', imp1j);
+        ok((await importPost(B.userId, { code: exp.code }, {})).status === 403, 'import needs the admin key');
+        const impBad = await importPost(B.userId, { code: exp.code.slice(0, -5) });
+        ok(impBad.status === 400 && /cut off|checksum|mangled/i.test((await impBad.json()).error), 'a damaged code is a readable 400');
+        const impMerge = await (await importPost(B.userId, { code: tagconfig.encodeCode({ textSize: 20 }), mode: 'merge' })).json();
+        ok(impMerge.info.effective.textSize === 20 && impMerge.info.effective.label === 'Export Me', 'merge mode keeps what was already there');
+        const evilBody = Buffer.from('{"primary":"#00ff00","__proto__":{"x":1},"bogus":1}');
+        const evilImp = await (await importPost(B.userId, { code: `SCORPTAG1.${evilBody.toString('base64url')}.${tagconfig.adler32(evilBody).toString(16).padStart(8, '0')}` })).json();
+        ok(evilImp.applied === 1 && evilImp.ignored.includes('bogus') && evilImp.info.effective.primary === '#00ff00', 'unknown keys in a code are ignored and reported, valid ones applied', evilImp);
+        const emptyCode = await importPost(B.userId, { code: tagconfig.encodeCode({}) });
+        ok(emptyCode.status === 400, 'a code with nothing in it is rejected instead of wiping the design');
+        await putTag(B.userId, { textSize: 21 });
+        const presetRes = await fetch(`${tagUrl(B.userId)}/preset`, { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ name: 'Cyber Blue' }) });
+        const presetJ = await presetRes.json();
+        ok(presetRes.status === 200 && presetJ.effective.accentA === '#3cc8ff' && presetJ.overrides.textSize === 21, 'POST …/preset paints a preset and keeps non-colour options', presetJ.error);
+        ok((await fetch(`${tagUrl(B.userId)}/preset`, { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ name: 'nope' }) })).status === 400, 'unknown preset is a 400');
+        await fetch(tagUrl(B.userId), { method: 'DELETE', headers: admin });
+        await fetch(tagUrl(C.userId), { method: 'DELETE', headers: admin });
+
+        const del = await fetch(`${tagUrl(A.userId)}?option=primary`, { method: 'DELETE', headers: admin });
+        ok(del.status === 200 && !('primary' in (await del.json()).overrides), 'DELETE ?option= resets a single option');
+        await fetch(tagUrl(A.userId), { method: 'DELETE', headers: admin });
+        ok(!(await (await fetch(tagUrl(A.userId), { headers: admin })).json()).hasCustomTag, 'DELETE with no option clears the whole design');
+        ok(JSON.parse(fs.readFileSync(path.join(S.dataDir, 'tags.json'), 'utf8'))[A.userId] === undefined, 'cleared designs are removed from data/tags.json');
+
         section('Admin');
         ok((await fetch(`${base}/api/admin/blacklist`)).status === 403, 'admin routes reject no key');
         ok((await fetch(`${base}/api/admin/blacklist?password=admin-secret`)).status === 403, 'password in the query string is NOT accepted');
@@ -333,6 +391,66 @@ async function testLua(d, S) {
     ok(byOwner.Tester && byOwner.Tester.title === 'Member', 'and their own Member tag');
     ok(byOwner.Drew && byOwner.Drew.avatar && byOwner.Drew.avatar.startsWith('rbxthumb'), 'avatar headshot replaces the glyph');
 
+    // ── custom designs made from Discord / the admin API show up in-game ──
+    const putDesign = (id, body) => fetch(`${S.base}/api/admin/tags/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify(body) });
+    await putDesign(6003, { label: 'Cosmic Herald', userText: 'none', image: '1270554045585765', primary: '#ff8800', rankFont: 'GothamBlack', textSize: 18, fullSize: '168x34', offsets: '3.05/2.65', glow: 'off', distances: '12/20/10000' });
+    await putDesign(6004, { label: 'FX Test', userText: 'Custom line', textAnimation: 'shimmer', pulse: 'on', particles: 'on', grid: 'on', underlineSweep: 'on', glitch: 'on', logoMotion: 'on', background: '99887766', theme: '#33aaff' });
+    await sleep(1300);
+    run('basic.lua', { MY_ID: '6003', MY_NAME: 'Nova', JOB_ID: 'L5', HWID: 'LUA-NOVA' });
+    await sleep(1300);
+    run('basic.lua', { MY_ID: '6004', MY_NAME: 'Fx', JOB_ID: 'L5', HWID: 'LUA-FX' });
+    await sleep(1300);
+    const design = run('basic.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L5', OTHERS: '6003:Nova:Nova,6004:Fx:Fx', HWID: 'LUA-T3' });
+    const dOwner = Object.fromEntries((design?.tags || []).map(t => [t.owner, t]));
+    const nova = dOwner.Nova, fx = dOwner.Fx;
+    ok(nova && nova.title === 'Cosmic Herald' && nova.name === undefined, 'custom label shows and userText "none" hides the second line', nova);
+    ok(nova && nova.avatar === 'rbxassetid://1270554045585765', 'custom logo image replaces the avatar', nova && nova.avatar);
+    ok(nova && Math.round(nova.titleColor[0]) === 255 && Math.round(nova.titleColor[1]) === 136 && Math.round(nova.titleColor[2]) === 0, 'custom primary colour #ff8800 colours the label', nova && nova.titleColor);
+    ok(nova && nova.titleFont === 'Font.GothamBlack' && nova.titleSize === 18, 'custom rank font + text size apply', nova && [nova.titleFont, nova.titleSize]);
+    ok(nova && nova.cardWidth === 168 && nova.cardHeight === 34 && nova.studsOffset === 3.05, 'fixed card size 168x34 and 3.05 stud offset apply', nova && [nova.cardWidth, nova.cardHeight, nova.studsOffset]);
+    ok(nova && nova.hasGlow === false, 'glow off removes the glow frame');
+    ok(fx && fx.title === 'FX Test' && fx.name === 'Custom line', 'custom user text replaces the display name', fx);
+    ok(fx && fx.particles === 5 && fx.gridLines === 2 && fx.underline && fx.hasBackground, 'particles, grid, underline sweep and background image are drawn', fx);
+    ok(fx && Math.round(fx.accent[0]) === 51 && Math.round(fx.accent[1]) === 170 && Math.round(fx.accent[2]) === 255, 'theme colour #33aaff drives the accent ring', fx && fx.accent);
+    ok(design && design.threadErrors === 0 && design.warnings.length === 0, 'every effect runs without Lua errors', design && design.warnings);
+
+    // ── in-game tag editor ↔ export codes ↔ bot ──
+    await sleep(1300);
+    const jsCode = tagconfig.encodeCode({ label: 'Nova ✨', textSize: 22, rankFont: 'Oswald', glow: false, primary: '#33aaff', userText: 'Custom line' });
+    const ed = run('editor.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'E1', HWID: 'LUA-ED', IMPORT_CODE: jsCode });
+    ok(ed && ed.threadErrors === 0 && ed.warnings.length === 0, 'tag editor loads and runs every control without Lua errors', ed && ed.warnings);
+    ok(ed && ed.hasPreviewHolder && ed.initial && ed.initial.title === 'Member' && ed.initial.cardHeight === 42, 'live preview draws the default tag before you change anything', ed && ed.initial);
+    const e1 = ed && ed.edited;
+    ok(e1 && e1.title === 'Cosmic Herald' && e1.name === undefined && e1.titleSize === 18 && e1.titleFont === 'Font.GothamBlack' && e1.cardWidth === 168 && e1.cardHeight === 34, 'editing controls redraws the live preview (label, user text, font, size, card size)', e1);
+    ok(e1 && Math.round(e1.titleColor[0]) === 255 && Math.round(e1.titleColor[1]) === 136 && e1.particles === 5 && e1.hasGlow === false && e1.avatar === 'rbxassetid://1270554045585765', 'colour picker, particles, glow and logo image reach the preview', e1);
+    ok(ed && ed.logoAfterBad === 'rbxassetid://1270554045585765', 'an invalid asset id is refused and the box snaps back to the last good value', ed && ed.logoAfterBad);
+    ok(ed && ed.afterReset && ed.afterReset.title === 'Member', '"Reset Design" returns the preview to the defaults');
+    ok(ed && ed.code && ed.code === ed.exportBoxValue, 'Copy Export Code puts a SCORPTAG1 code on the clipboard (and in the code box)');
+    let luaMade = null;
+    try { luaMade = tagconfig.decodeCode(ed.code); } catch (e) { luaMade = { error: e.message }; }
+    const wantLua = { fullHeight: 34, fullWidth: 168, glow: false, image: 'rbxassetid://1270554045585765', label: 'Cosmic Herald', particles: true, primary: '#ff8800', rankFont: 'GothamBlack', textAnimation: 'wave', textSize: 18, userText: 'none' };
+    ok(luaMade && JSON.stringify(luaMade.overrides) === JSON.stringify(wantLua) && !luaMade.invalid.length && !luaMade.ignored.length, 'a code made IN-GAME (Lua) is accepted by the bot side (JS) with every option intact', luaMade);
+    const imp = ed && ed.imported;
+    ok(imp && imp.title === 'Nova ✨' && imp.name === 'Custom line' && imp.titleSize === 22 && imp.titleFont === 'Font.Oswald' && imp.hasGlow === false && Math.round(imp.titleColor[2]) === 255, 'a code made by the bot side (JS) loads into the editor preview (UTF-8 label included)', imp);
+    ok(ed && ed.importedControls && ed.importedControls.textSize === 22 && ed.importedControls.rankFont === 'Oswald' && ed.importedControls.glow === false && ed.importedControls.label === 'Nova ✨' && Math.round(ed.importedControls.primary[0]) === 51, 'importing moves every control (sliders, dropdowns, toggles, textboxes, colour pickers)', ed && ed.importedControls);
+    let reexp = null;
+    try { reexp = tagconfig.decodeCode(ed.reexported); } catch (e) { reexp = { error: e.message }; }
+    ok(reexp && reexp.overrides && reexp.overrides.label === 'Nova ✨' && reexp.overrides.textSize === 22 && Object.keys(reexp.overrides).length === 6, 'import → export in Lua round-trips the same six options', reexp);
+    ok(ed && ed.rejects && ed.rejects.length === 2 && ed.rejects.every(r => /Import failed/.test(r)), 'garbage codes are rejected in-game with a reason', ed && ed.rejects);
+    // the Lua-made code, applied by the real server, becomes what other players see
+    const luaImport = await fetch(`${S.base}/api/admin/tags/6010/import`, { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ code: ed.code }) });
+    const luaImportJ = await luaImport.json();
+    ok(luaImport.status === 200 && luaImportJ.info.effective.label === 'Cosmic Herald' && luaImportJ.info.effective.fullWidth === 168 && luaImportJ.applied === 11, 'the in-game export imports into the real server end to end', luaImportJ.error || luaImportJ);
+
+    // distance level-of-detail: full up close, logo-only far away, hidden past the max distance
+    await sleep(1300);
+    const near = run('basic.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L5', OTHERS: '6003:Nova:Nova', OTHER_DIST: '5', HWID: 'LUA-T4' });
+    await sleep(1300);
+    const far = run('basic.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L5', OTHERS: '6003:Nova:Nova', OTHER_DIST: '30', HWID: 'LUA-T5' });
+    const nearNova = (near?.tags || []).find(t => t.owner === 'Nova'), farNova = (far?.tags || []).find(t => t.owner === 'Nova');
+    ok(nearNova && nearNova.cardWidth === 168 && nearNova.studsOffset === 3.05, 'within distFull the full card is shown', nearNova);
+    ok(farNova && farNova.cardWidth === 40 && farNova.studsOffset === 2.65, 'beyond distMini only the logo (miniSize 40) is shown, at the mini offset', farNova);
+
     await sleep(300);
     await run('basic.lua', { MY_ID: '6002', MY_NAME: 'Drew', JOB_ID: 'L2', OTHERS: '5001:Tester:Tester,1000:Boss:Boss', HWID: 'LUA-DREW2' });
     const ctl = run('controls.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L2', OTHERS: '6002:Drew:Drew', HWID: 'LUA-T2' });
@@ -359,8 +477,18 @@ async function testLua(d, S) {
 process.on('unhandledRejection', e => { console.error('UNHANDLED REJECTION:', e && e.stack || e); process.exitCode = 1; });
 process.on('uncaughtException', e => { console.error('UNCAUGHT EXCEPTION:', e && e.stack || e); process.exitCode = 1; });
 
+async function testTagBot() {
+    section('Tag designs (tagconfig + Discord bot)');
+    const r = await require('./tagbot.test.js').run();
+    passed += r.passed;
+    failed += r.failed;
+    failures.push(...r.failures);
+    console.log(`  ${r.failed ? '✗' : '✓'} ${r.passed} checks passed${r.failed ? `, ${r.failed} failed (see above)` : ''}`);
+}
+
 (async () => {
     console.log('Scorp test suite');
+    await testTagBot();
     await testObfuscator();
     const d = await startFakeDiscord();
     let S;

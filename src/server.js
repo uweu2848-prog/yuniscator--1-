@@ -8,7 +8,7 @@
  *   POST /api/nametags/leave
  *   GET  /loader.lua           the (obfuscated) loader, with this server's URL baked in
  *   GET  /api/health           build id, webhook status — no secrets
- *   /api/admin/*               roles, bans, sessions, webhook test (X-Admin-Key header)
+ *   /api/admin/*               roles, custom nametag designs, bans, sessions, webhook test (X-Admin-Key header)
  *
  * All secrets come from environment variables (see .env.example). Nothing
  * secret lives in this file, so it is safe to commit.
@@ -37,6 +37,7 @@ const ROOT = path.join(__dirname, '..');
 
 const express = require('express');
 const obf = require('../obfuscate');
+const tagconfig = require('./tagconfig');
 
 // ────────────────────────────────────────────────────────────────────────────
 // CONFIG
@@ -97,6 +98,7 @@ const CODE_INFO = {
 fs.mkdirSync(CONFIG.DATA_DIR, { recursive: true });
 const OFFENSES_FILE = path.join(CONFIG.DATA_DIR, 'offenses.json');
 const ROLES_FILE = path.join(CONFIG.DATA_DIR, 'roles.json');
+const TAGS_FILE = path.join(CONFIG.DATA_DIR, 'tags.json');
 const SECRET_FILE = path.join(CONFIG.DATA_DIR, 'session.key');
 const LIB_FILE = path.join(ROOT, 'src', 'ScorpLib.lua');
 const LOADER_FILE = path.join(ROOT, 'loader.lua');
@@ -416,6 +418,111 @@ function roleFor(userId) {
     return { role: 'member', label: DEFAULT_LABEL.member };
 }
 
+// ── Custom tag designs (colours, fonts, effects …) ─────────────────────────
+// data/tags.json:  { "<userId>": { overrides: { …only what was changed… }, updatedAt } }
+// Options, validation, defaults and role presets all live in src/tagconfig.js.
+let tags = {};
+for (const [id, v] of Object.entries(readJson(TAGS_FILE, {}))) {
+    const overrides = tagconfig.sanitizeOverrides(v && v.overrides);
+    if (isDigits(id) && Object.keys(overrides).length) tags[id] = { overrides, updatedAt: (v && v.updatedAt) || null };
+}
+const saveTags = () => writeJsonAtomic(TAGS_FILE, tags);
+
+/** What the Discord embed / admin API show: role, label and the fully resolved design. */
+function tagInfo(userId) {
+    userId = String(userId);
+    const r = roleFor(userId);
+    const overrides = (tags[userId] && tags[userId].overrides) || {};
+    return {
+        userId,
+        role: r.role,
+        roleLabel: r.label,
+        hasCustomTag: Object.keys(overrides).length > 0,
+        overrides,
+        effective: tagconfig.effectiveTag(r.role, overrides, r.label),
+        updatedAt: (tags[userId] && tags[userId].updatedAt) || null,
+    };
+}
+
+function commitTag(userId, overrides) {
+    if (Object.keys(overrides).length) tags[userId] = { overrides, updatedAt: new Date().toISOString() };
+    else delete tags[userId];
+    saveTags();
+    return tagInfo(userId);
+}
+
+/** Change options: { primary: '#ff8800', glow: 'off', distances: '12/20/10000', theme: '#ff8800', … } — all or nothing. */
+function setTagOptions(userId, options) {
+    userId = String(userId);
+    if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+    let next = { ...((tags[userId] && tags[userId].overrides) || {}) };
+    const entries = Object.entries(options || {});
+    if (!entries.length) throw new tagconfig.TagError('Nothing to change.');
+    for (const [key, value] of entries) {
+        if (key === 'theme') next = { ...next, ...tagconfig.themeOverrides(value) };
+        else next = tagconfig.applyOption(next, key, value);
+    }
+    return commitTag(userId, next);
+}
+
+/** resetTag(id) wipes the whole design; resetTag(id, 'primary') resets just that option. */
+function resetTag(userId, option) {
+    userId = String(userId);
+    if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+    if (!option) return commitTag(userId, {});
+    return commitTag(userId, tagconfig.applyOption((tags[userId] && tags[userId].overrides) || {}, option, 'default'));
+}
+
+function copyTag(fromId, toId) {
+    fromId = String(fromId); toId = String(toId);
+    if (!isDigits(fromId) || !isDigits(toId)) throw new tagconfig.TagError('Both ids must be numeric.');
+    const src = (tags[fromId] && tags[fromId].overrides) || null;
+    if (!src) throw new tagconfig.TagError(`\`${fromId}\` doesn't have a custom tag to copy.`);
+    return commitTag(toId, { ...src });
+}
+
+/**
+ * Import a SCORPTAG1 export code (from the in-game tag editor or /tag export).
+ * mode 'replace' (default) makes the code THE design; 'merge' layers it over what's already there.
+ * Unknown / invalid options are skipped and reported back, never applied.
+ */
+function importTag(userId, code, mode = 'replace') {
+    userId = String(userId);
+    if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+    const { overrides, ignored, invalid } = tagconfig.decodeCode(code);
+    if (!Object.keys(overrides).length) {
+        throw new tagconfig.TagError(invalid.length ? `Nothing usable in that code: ${invalid.slice(0, 3).join('; ')}` : 'That code doesn\'t change anything from the defaults.');
+    }
+    const base = mode === 'merge' ? ((tags[userId] && tags[userId].overrides) || {}) : {};
+    const info = commitTag(userId, { ...base, ...overrides });
+    return { info, ignored, invalid, applied: Object.keys(overrides).length, mode: mode === 'merge' ? 'merge' : 'replace' };
+}
+
+/** A player's current design as a shareable code. */
+function exportTag(userId) {
+    userId = String(userId);
+    if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+    const overrides = (tags[userId] && tags[userId].overrides) || {};
+    if (!Object.keys(overrides).length) throw new tagconfig.TagError(`\`${userId}\` doesn't have a custom design to export.`);
+    return { code: tagconfig.encodeCode(overrides), options: Object.keys(overrides).length };
+}
+
+/** Apply a named colour preset (keeps every non-colour option). */
+function applyPreset(userId, name) {
+    userId = String(userId);
+    if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+    return commitTag(userId, { ...((tags[userId] && tags[userId].overrides) || {}), ...tagconfig.presetOverrides(name) });
+}
+
+/** The public part of a player's tag that goes to other clients: role, label and only the changed options. */
+function publicTagFor(userId) {
+    const r = roleFor(userId);
+    const overrides = tags[String(userId)] && tags[String(userId)].overrides;
+    const out = { role: r.role, label: (overrides && overrides.label) || r.label };
+    if (overrides && Object.keys(overrides).length) out.tag = overrides;
+    return out;
+}
+
 function throttled(key, ms) {
     const t = now();
     const last = alertSeen.get(key);
@@ -703,7 +810,7 @@ app.post('/api/nametags/sync', requireToken, (req, res) => {
     for (const p of presence.values()) {
         if (t - p.lastSeen > CONFIG.PRESENCE_TTL_MS) continue;
         if (p.userId !== me.userId && (!jobId || p.jobId !== jobId)) continue;
-        users.push({ userId: Number(p.userId), username: p.username, displayName: p.displayName, ...roleFor(p.userId) });
+        users.push({ userId: Number(p.userId), username: p.username, displayName: p.displayName, ...publicTagFor(p.userId) });
         if (users.length >= 100) break;
     }
     res.json({ ok: true, users });
@@ -715,7 +822,7 @@ app.post('/api/nametags/leave', requireToken, (req, res) => {
 });
 
 // ── Admin ───────────────────────────────────────────────────────────────────
-const adminLimiter = rateLimit({ windowMs: 60_000, max: 30, name: 'admin' });
+const adminLimiter = rateLimit({ windowMs: 60_000, max: num(env.ADMIN_RATE_PER_MIN, 30), name: 'admin' }); // per IP; raise it if you script the admin API
 function requireAdmin(req, res, next) {
     const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
     const supplied = req.get('x-admin-key') || (m && m[1]) || '';
@@ -811,6 +918,61 @@ app.delete('/api/admin/roles/:userId', (req, res) => {
     res.json({ ok: true });
 });
 
+// ── Custom tag designs (same functions the Discord /tag command uses) ───────
+//   GET    /api/admin/tags                 everyone with a custom design
+//   GET    /api/admin/tags/options         every option + allowed values + defaults
+//   GET    /api/admin/tags/:userId         role, overrides and the fully resolved design
+//   PUT    /api/admin/tags/:userId         body: { "primary": "#ff8800", "glow": "off", "theme": "#33aaff", … }
+//   DELETE /api/admin/tags/:userId[?option=primary]   reset one option, or the whole design
+//   GET    /api/admin/tags/:userId/export   → { code }   (SCORPTAG1.… — same format the in-game tag editor makes)
+//   POST   /api/admin/tags/:userId/import   body: { code, mode: 'replace' | 'merge' }
+//   POST   /api/admin/tags/:userId/preset   body: { name: 'Cyber Blue' }
+app.get('/api/admin/tags', (_req, res) => res.json({ tags: Object.fromEntries(Object.entries(tags).map(([id, t]) => [id, t.overrides])) }));
+app.get('/api/admin/tags/options', (_req, res) => res.json({
+    groups: tagconfig.GROUPS, composites: tagconfig.COMPOSITES, types: tagconfig.TYPES, fonts: tagconfig.FONTS,
+    animations: tagconfig.ANIMATIONS, defaults: tagconfig.DEFAULTS, rolePresets: tagconfig.ROLE_PRESETS, colorPresets: tagconfig.PRESET_NAMES,
+}));
+app.get('/api/admin/tags/:userId', (req, res) => {
+    if (!isDigits(req.params.userId)) return res.status(400).json({ error: 'bad userId' });
+    res.json(tagInfo(req.params.userId));
+});
+app.put('/api/admin/tags/:userId', (req, res) => {
+    try {
+        res.json(setTagOptions(req.params.userId, req.body));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+app.get('/api/admin/tags/:userId/export', (req, res) => {
+    try {
+        res.json(exportTag(req.params.userId));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+app.post('/api/admin/tags/:userId/import', (req, res) => {
+    try {
+        const b = req.body || {};
+        res.json(importTag(req.params.userId, b.code, b.mode));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+app.post('/api/admin/tags/:userId/preset', (req, res) => {
+    try {
+        res.json(applyPreset(req.params.userId, (req.body || {}).name));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+app.delete('/api/admin/tags/:userId', (req, res) => {
+    try {
+        res.json(resetTag(req.params.userId, req.query.option ? String(req.query.option) : undefined));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
 app.post('/api/admin/rebuild', (_req, res) => {
     const b = ensureBuilt(true);
     res.json({ ok: !buildError, build: b && { id: b.id, builtAt: b.builtAt, bytes: b.bytes }, buildError });
@@ -853,6 +1015,8 @@ function startDiscordBotIfConfigured() {
             setRole,
             clearRole,
             getRoles: () => roles,
+            tags: { info: tagInfo, set: setTagOptions, reset: resetTag, copy: copyTag, list: () => tags, import: importTag, export: exportTag, preset: applyPreset },
+            publicUrl: CONFIG.PUBLIC_URL,
             log,
         });
     } catch (e) {

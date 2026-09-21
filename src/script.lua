@@ -24,6 +24,11 @@ local Nametags = (function()
 --@include nametags.lua
 end)()
 
+-- Tag editor (live preview + export/import codes; lives in src/tageditor.lua)
+local TagEditor = (function()
+--@include tageditor.lua
+end)()
+
 -- ───────────────────────────────────────────────────────────────────────────
 --  UI library (delivered by the server over the authenticated session)
 -- ───────────────────────────────────────────────────────────────────────────
@@ -144,6 +149,9 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 --  Settings
 -- ───────────────────────────────────────────────────────────────────────────
+-- Tag Editor tab (design a nametag, export a code for the Discord bot's /tag import)
+local Editor = TagEditor.Build(Window, Nametags)
+
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
 Window:AddThemeControls(Settings, "🎨 Theme")
@@ -197,6 +205,7 @@ end
 
 Window:OnUnload(function()
     print("[Scorp] unloaded")
+    pcall(Editor.Destroy)
     Nametags.Stop()
 end)
 

@@ -56,6 +56,7 @@ const varName = () => '_' + randomFrom('abcdefghijklmnopqrstuvwxyz0123456789', 7
 // the contents of src/nametags.lua. Lets the nametag design live in its own file.
 // ────────────────────────────────────────────────────────────────────────────
 const INCLUDE_RE = /^[ \t]*--@include[ \t]+([\w./-]+)[ \t]*$/gm;
+const TAGDATA_RE = /^[ \t]*--@tagdata[ \t]*$/gm;
 
 function bundle(entry = ENTRY) {
     const files = new Set();
@@ -69,7 +70,15 @@ function bundle(entry = ENTRY) {
         }
         if (!fs.existsSync(resolved)) throw new Error(`--@include target not found: ${path.relative(ROOT, resolved)}`);
         files.add(resolved);
-        const text = fs.readFileSync(resolved, 'utf8').replace(/\r\n/g, '\n');
+        let text = fs.readFileSync(resolved, 'utf8').replace(/\r\n/g, '\n');
+        // `--@tagdata` → the nametag defaults / role presets generated from src/tagconfig.js, so the
+        // in-game renderer and the Discord bot's embed can never disagree about a default.
+        text = text.replace(TAGDATA_RE, () => {
+            const tagconfigPath = path.join(SRC_DIR, 'tagconfig.js');
+            files.add(tagconfigPath);
+            if (require.main === module) delete require.cache[require.resolve(tagconfigPath)]; // --watch picks up edits
+            return require(tagconfigPath).toLua();
+        });
         return text.replace(INCLUDE_RE, (_m, rel) => load(path.join(SRC_DIR, rel), [...stack, resolved]));
     }
     const code = load(entry, []);

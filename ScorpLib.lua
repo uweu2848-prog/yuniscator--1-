@@ -1229,6 +1229,12 @@ function Section:AddLabel(text, o)
     return obj
 end
 
+--- Section:AddCustom(height) -> Frame
+--- An empty transparent row you can build anything into (the tag editor's live preview lives in one).
+function Section:AddCustom(height)
+    return Make("Frame", { Parent = self.Content, Size = UDim2.new(1, 0, 0, height or 100), BackgroundTransparency = 1, ClipsDescendants = true })
+end
+
 --- Section:AddButton("Name", function() end)
 function Section:AddButton(name, callback)
     local win = self.Window

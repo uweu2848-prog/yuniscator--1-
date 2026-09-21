@@ -85,12 +85,10 @@ live" has a real answer.
 
 ## Nametags
 
-- Design lives in the `DESIGN` and `STYLES` tables at the top of
-  `src/nametags.lua` — colors, sizes, glow speed, per-role accent
-  color and glyph. Not a copy of M7's; same "glowing card above the
-  head" idea, different palette/shape/animation (rotating light border
-  instead of a static outline, round emblem instead of a plain badge,
-  headshot avatars).
+- Defaults, per-role looks and every custom option live in **`src/tagconfig.js`**
+  (one source of truth). The build inlines them into `src/nametags.lua` at the
+  `--@tagdata` line, and the Discord embed reads the same file, so what the bot
+  shows is exactly what renders in-game. Change a default → restart the server.
 - Roles are assigned **server-side only** — a client can never grant
   itself a role:
   ```bash
@@ -107,10 +105,85 @@ live" has a real answer.
 - Roles can also be set from Discord instead of `curl` — see the
   **Discord bot** section below.
 
+## Custom tag designs (`/tag`)
+
+Every tag can be styled per player with the same options as the tag-import
+embed this was modelled on. Only what you change is stored (`data/tags.json`)
+and sent to clients; everything else falls back to
+`defaults + the player's role preset`.
+
+| Group   | Options |
+|---------|---------|
+| Text    | `label`, `userText` (`auto` = display name, `none`, or your text), `rankFont`, `userFont`, `textSize` |
+| Layout  | `image` (logo asset id), `background` (asset id), `fullSize` (`168x34`, `auto x 42`), `miniSize`, `offsets` (`3.05/2.65` studs), `distances` (`12/20/10000`) |
+| Colours | 29: `primary`, `backgroundColorA/B/C`, `backgroundImageColor`, `accentA/B/C`, `highlightColor`, `nameColor`, `textStrokeColor`, `borderColor`, `outlineColorA/B/C`, `outerGlowColor`, `glowColorA/B/C`, `logoGlowColor`, `particleColorA/B`, `overlayColorA/B`, `underlineColorA/B/C`, `gridColor`, `glitchColor` |
+| Effects | `textAnimation` (`default`/`shimmer`/`rainbow`/`wave`), `glow`, `pulse`, `spin`, `particles`, `underlineSweep`, `glitch`, `effects` (master switch), `grid`, `logoMotion` |
+
+`distances` = full card until *a* studs → shrinking to *b* → logo only (`miniSize`)
+from *b* → hidden beyond *c*. The viewer's own "Tag Distance" slider still caps it.
+
+**Discord** (needs the bot from the section below):
+
+```
+/tag view    roblox_id                      the embed: target, text, layout, colours, effects
+/tag set     roblox_id option value         any single option (autocomplete lists them all)
+/tag text    roblox_id [label user_text rank_font user_font text_size]
+/tag layout  roblox_id [image background full_size mini_size offsets distances]
+/tag color   roblox_id name hex             one colour (autocomplete lists all 29)
+/tag theme   roblox_id color                repaint every colour from one accent colour
+/tag effects roblox_id [text_animation glow pulse spin particles underline_sweep glitch effects grid logo_motion]
+/tag reset   roblox_id [option]             back to the role's look (one option or everything)
+/tag copy    from_id to_id                  give one player another's design
+/tag preset  roblox_id preset               apply a colour preset (Silver Surfer, Cyber Blue, Gold Royal, …)
+/tag import  roblox_id code [mode]          apply an export code from the in-game tag editor (replace / merge)
+/tag export  roblox_id                      a player's design as a shareable code
+/tag list
+```
+
+After a change the bot posts the updated embed; the player's tag updates in-game
+within about 10 seconds. Re-run the server once after updating so the bot
+registers the new `/tag` command (guild-scoped commands appear instantly).
+
+**HTTP** (same functions, same validation):
+
+```bash
+curl -X PUT https://your-server/api/admin/tags/123456 \
+  -H "X-Admin-Key: $ADMIN_PASSWORD" -H "content-type: application/json" \
+  -d '{"label":"Cosmic Herald","primary":"#ff8800","glow":"off","distances":"12/20/10000"}'
+# GET /api/admin/tags/options   → every option, allowed values, defaults
+# DELETE /api/admin/tags/123456[?option=primary]
+```
+
+### Tag editor + export codes
+
+The script has a **Tag Editor** tab: live preview (a 2-D copy of the tag, always visible),
+colour presets, text & fonts, images, layout, all 29 colours, effects and text animation.
+"Show On My Tag" also puts the draft above your own head so you can judge it in the world.
+
+- **Copy Export Code** → a code like `SCORPTAG1.eyJnbG93…​.075c48e2` on your clipboard (or printed
+  to the console if your executor has no clipboard function). It only contains the options
+  you changed, so it stays short.
+- Send that code to whoever runs the bot; they run
+  `/tag import roblox_id:<player> code:<the code>`. The bot posts the tag embed so it can be
+  checked (logo image preview included) before it goes live in-game.
+  `mode: merge` layers the code on top of a design instead of replacing it.
+- **Import Code** in the editor does the reverse: paste any code (yours, one from `/tag export`)
+  and every control jumps to it.
+- Codes are validated on both sides with the same rules: unknown options are ignored, bad values
+  are skipped and reported, a checksum catches cut-off or edited codes, and a code can never
+  set anything `/tag set` couldn't. Over HTTP: `GET /api/admin/tags/:userId/export`,
+  `POST /api/admin/tags/:userId/import {"code": "...", "mode": "replace"}`,
+  `POST /api/admin/tags/:userId/preset {"name": "Cyber Blue"}`.
+
+The editor is `src/tageditor.lua`; the code format lives in `src/tagconfig.js` (JS) and
+`src/nametags.lua` (Lua) and is tested in both directions (a code made in Lua is decoded by JS
+and vice versa). Presets are defined in `COLOR_PRESET_DEFS` in `src/tagconfig.js` — add yours there.
+The admin API allows 30 requests/min per IP by default; set `ADMIN_RATE_PER_MIN` to raise it.
+
 ## Discord bot (optional)
 
 Set `DISCORD_TOKEN` in `.env` (see the comments there for how to get one)
-and the server starts a bot alongside itself with one slash command:
+and the server starts a bot alongside itself with two slash commands — `/tag` (documented above) and `/nametag` for roles:
 
 - `/nametag set roblox_id:<id> role:<role> [label:<text>]` — same as the
   `PUT /api/admin/roles/:userId` call above, just from Discord

@@ -17,7 +17,7 @@ local json = require("json")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
 
-local H = { warnings = {}, prints = {}, controls = {}, unloads = {}, notifies = {}, requests = {} }
+local H = { warnings = {}, prints = {}, controls = {}, controlObjs = {}, customFrames = {}, unloads = {}, notifies = {}, requests = {} }
 local function env(name, default) return os.getenv(name) or default end
 
 local URL = env("SCORP_URL", "http://127.0.0.1:3000")
@@ -74,12 +74,20 @@ Color3MT.__index = Color3MT
 function Color3MT:Lerp(o, a)
     return setmetatable({ R = self.R + (o.R - self.R) * a, G = self.G + (o.G - self.G) * a, B = self.B + (o.B - self.B) * a }, Color3MT)
 end
-Color3 = { fromRGB = function(r, g, b) return setmetatable({ R = r, G = g, B = b }, Color3MT) end }
+Color3 = {
+    fromRGB = function(r, g, b) return setmetatable({ R = r, G = g, B = b }, Color3MT) end,
+    new = function(r, g, b) return setmetatable({ R = r * 255, G = g * 255, B = b * 255 }, Color3MT) end,
+    fromHSV = function(h, s, v) return setmetatable({ R = v * 255, G = v * 255 * (1 - s), B = v * 255 * (1 - s), H = h }, Color3MT) end,
+}
 UDim = { new = function(s, o) return { Scale = s, Offset = o } end }
+local UDim2MT = {}
+local function udim2(xs, xo, ys, yo) return setmetatable({ X = { Scale = xs, Offset = xo }, Y = { Scale = ys, Offset = yo } }, UDim2MT) end
+UDim2MT.__add = function(a, b) return udim2(a.X.Scale + b.X.Scale, a.X.Offset + b.X.Offset, a.Y.Scale + b.Y.Scale, a.Y.Offset + b.Y.Offset) end
+UDim2MT.__sub = function(a, b) return udim2(a.X.Scale - b.X.Scale, a.X.Offset - b.X.Offset, a.Y.Scale - b.Y.Scale, a.Y.Offset - b.Y.Offset) end
 UDim2 = {
-    new = function(xs, xo, ys, yo) return { X = { Scale = xs, Offset = xo }, Y = { Scale = ys, Offset = yo } } end,
-    fromOffset = function(x, y) return { X = { Scale = 0, Offset = x }, Y = { Scale = 0, Offset = y } } end,
-    fromScale = function(x, y) return { X = { Scale = x, Offset = 0 }, Y = { Scale = y, Offset = 0 } } end,
+    new = udim2,
+    fromOffset = function(x, y) return udim2(0, x, 0, y) end,
+    fromScale = function(x, y) return udim2(x, 0, y, 0) end,
 }
 Vector2 = { new = function(x, y) return { X = x, Y = y } end }
 Vector3 = { new = function(x, y, z) return { X = x, Y = y, Z = z } end }
@@ -90,6 +98,11 @@ Enum = setmetatable({}, { __index = function(_, cat)
     return setmetatable({}, { __index = function(_, item) return cat .. "." .. item end })
 end })
 math.clamp = function(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+tick = function() return clock end
+Random = { new = function() return {
+    NextInteger = function(_, a, b) return math.random(a, b) end,
+    NextNumber = function(_, a, b) return a + math.random() * (b - a) end,
+} end }
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Instances
@@ -146,6 +159,7 @@ local function newPlayer(id, name, display)
     model.Name = name
     local head = newInstance("Part")
     head.Name = "Head"
+    head.Position = Vector3.new(id == MY_ID and 0 or tonumber(env("OTHER_DIST", "5")), 0, 0)
     head.Parent = model
     p.Character = model
     players[#players + 1] = p
@@ -157,6 +171,8 @@ for entry in (env("OTHERS", "")):gmatch("[^,]+") do
     local id, name, display = entry:match("^(%d+):([^:]+):?(.*)$")
     if id then newPlayer(tonumber(id), name, display ~= "" and display or name) end
 end
+
+workspace = { CurrentCamera = { CFrame = { Position = Vector3.new(0, 0, 0) } } }
 
 local coreGui = newInstance("CoreGui") coreGui.Name = "CoreGui"
 local hui = newInstance("ScreenGui") hui.Name = "hui"
@@ -231,6 +247,7 @@ loadstring = native(function(src, name)
     end
     return rawLoad(src, name or "=payload", "t", _G)
 end)
+setclipboard = native(function(text) H.clipboard = text end)
 getgenv = native(function() return _G end)
 gethui = native(function() return hui end)
 warn = function(...)
@@ -268,11 +285,23 @@ local function generic()
     end })
 end
 local Section = setmetatable({}, { __index = function(_, k)
+    if k == "AddCustom" then
+        return function(_, height)
+            local f = newInstance("Frame")
+            f.Size = UDim2.new(1, 0, 0, height or 100)
+            H.customFrames[#H.customFrames + 1] = f
+            return f
+        end
+    end
     if k:match("^Add") then
         return function(_, name, opts)
             if type(opts) == "function" then opts = { Callback = opts } end
             H.controls[name] = opts or {}
-            return generic()
+            local obj = { value = opts and opts.Default }
+            function obj:Set(v) self.value = v end
+            function obj:Get() return self.value end
+            H.controlObjs[name] = obj
+            return obj
         end
     end
 end })
@@ -313,25 +342,53 @@ local function holderChildren()
     return folder and folder:GetChildren() or {}
 end
 
+local function countNamed(root, name)
+    local n = 0
+    for _, c in ipairs(root._children) do
+        if c.Name == name then n = n + 1 end
+        n = n + countNamed(c, name)
+    end
+    return n
+end
+
+local function summarize(g)
+    local badge = H.find(g, "Badge")
+    local stroke = badge and badge:FindFirstChild("UIStroke")
+    local glyph = H.find(g, "Glyph")
+    local avatar = H.find(g, "Avatar")
+    local titleLabel = H.find(g, "Title")
+    local nameLabel = H.find(g, "Name")
+    if not titleLabel then return nil end
+    return {
+        owner = g.Adornee and g.Adornee.Parent and g.Adornee.Parent.Name,
+        title = titleLabel.Text,
+        name = nameLabel and nameLabel.Text or nil,
+        glyph = glyph and glyph.Text,
+        glyphVisible = glyph and glyph.Visible ~= false,
+        avatar = avatar and avatar.Visible and avatar.Image or nil,
+        accent = stroke and { stroke.Color.R, stroke.Color.G, stroke.Color.B },
+        titleColor = titleLabel.TextColor3 and { titleLabel.TextColor3.R, titleLabel.TextColor3.G, titleLabel.TextColor3.B },
+        titleSize = titleLabel.TextSize,
+        titleFont = titleLabel.Font,
+        width = g.Size.X.Offset,
+        cardWidth = H.find(g, "Card") and H.find(g, "Card").Size.X.Offset,
+        cardHeight = H.find(g, "Card") and H.find(g, "Card").Size.Y.Offset,
+        studsOffset = g.StudsOffset and g.StudsOffset.Y,
+        maxDistance = g.MaxDistance,
+        alwaysOnTop = g.AlwaysOnTop,
+        hasGlow = H.find(g, "Glow") ~= nil,
+        hasBackground = H.find(g, "Background") ~= nil,
+        particles = countNamed(g, "Particle"),
+        gridLines = countNamed(g, "GridLine"),
+        underline = H.find(g, "Underline") ~= nil,
+    }
+end
+H.summarize = summarize
+
 function H.tags()
     local out = {}
     for _, g in ipairs(holderChildren()) do
-        local badge = H.find(g, "Badge")
-        local stroke = badge and badge:FindFirstChild("UIStroke")
-        local glyph = H.find(g, "Glyph")
-        local avatar = H.find(g, "Avatar")
-        out[#out + 1] = {
-            owner = g.Adornee and g.Adornee.Parent and g.Adornee.Parent.Name,
-            title = H.find(g, "Title").Text,
-            name = H.find(g, "Name").Text,
-            glyph = glyph and glyph.Text,
-            glyphVisible = glyph and glyph.Visible ~= false,
-            avatar = avatar and avatar.Visible and avatar.Image or nil,
-            accent = stroke and { stroke.Color.R, stroke.Color.G, stroke.Color.B },
-            width = g.Size.X.Offset,
-            maxDistance = g.MaxDistance,
-            alwaysOnTop = g.AlwaysOnTop,
-        }
+        out[#out + 1] = summarize(g)
     end
     table.sort(out, function(a, b) return tostring(a.owner) < tostring(b.owner) end)
     return out
