@@ -1,24 +1,23 @@
 -- ───────────────────────────────────────────────────────────────────────────
---  Scorp tag editor
+--  Scorp tag editor  –  standalone floating window
 --
---  Pulled into src/script.lua by the build (--@include) and ends with
---  `return TagEditor`.  script.lua calls  TagEditor.Build(Window, Nametags).
+--  TagEditor.Build(Scorp, Nametags) returns an api with:
+--      api.Open()    – show the editor window
+--      api.Close()   – hide it
+--      api.Destroy() – clean up on unload
+--      api.GetDraft(), api.Export(), api.Import(code)
 --
---  Adds a "Tag Editor" tab: live preview, colour presets, text & fonts, images,
---  layout, all 29 colours, effects, text animation — and Export / Import.
---
---  Export makes a code like  SCORPTAG1.eyJ…  from everything that differs from the
---  defaults. Hand it to whoever runs your Discord bot: /tag import roblox_id code.
---  Import does the reverse: paste a code and every control jumps to it.
---
---  Everything the editor knows (options, defaults, fonts, presets, ranges) comes
---  from Nametags.TAGDATA, i.e. src/tagconfig.js — the same data the bot validates
---  against, so a code from here can't contain something the bot doesn't understand.
+--  Called from script.lua as:
+--      local Editor = TagEditor.Build(Scorp, Nametags)
+--      -- then in Settings:
+--      sec:AddButton("Edit Nametag", function() Editor.Open() end)
 --
 --  Lua 5.1 syntax only (the obfuscator parses 5.1).
 -- ───────────────────────────────────────────────────────────────────────────
 
 local TagEditor = {}
+
+-- ── helpers ──────────────────────────────────────────────────────────────────
 
 local function pretty(key)
     local s = key:gsub("(%l)(%u)", "%1 %2")
@@ -32,38 +31,59 @@ local function copyToClipboard(text)
     return (pcall(fn, text))
 end
 
---- asset input → "rbxassetid://123" | "" | nil (invalid)
 local function parseAsset(text)
     text = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
     local low = text:lower()
     if text == "" or low == "none" or low == "off" then return "" end
-    local id = text:match("^rbxassetid://(%d+)$") or text:match("^(%d+)$") or text:match("/library/(%d+)") or text:match("/asset/(%d+)")
+    local id = text:match("^rbxassetid://(%d+)$")
+          or text:match("^(%d+)$")
+          or text:match("/library/(%d+)")
+          or text:match("/asset/(%d+)")
     if id then return "rbxassetid://" .. id end
     return nil
 end
 
-function TagEditor.Build(Window, Nametags)
-    local DATA = Nametags.TAGDATA
-    local D = DATA.defaults
+local function countKeys(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end
+
+-- ── standalone window builder ─────────────────────────────────────────────────
+
+function TagEditor.Build(Scorp, Nametags)
+    local DATA  = Nametags.TAGDATA
+    local D     = DATA.defaults
 
     local COLOR_SET = {}
     for _, k in ipairs(DATA.colorKeys) do COLOR_SET[k] = true end
 
-    local draft = {}      -- only the options that differ from the defaults (this is what gets exported)
-    local controls = {}   -- option key → control, so an import / preset can move them
-    local loading = false -- true while WE are pushing values into controls
+    local draft        = {}
+    local controls     = {}
+    local loading      = false
     local worldPreview = false
     local previewHolder, previewFrame, previewTween, exportBox, exportLabel
 
-    local function notify(text) Window:Notify("Tag Editor", text, 3) end
+    -- ── the standalone window ──────────────────────────────────────────────
+    --  CreateWindow accepts the same option table as the main window.
+    --  We use a separate one so it floats independently (like MOIS7's editor).
+    local EditorWindow = Scorp:CreateWindow({
+        Title      = "M7 NAMETAG EDITOR",
+        Subtitle   = "Design your tag",
+        Theme      = "Dark",
+        ToggleKey  = Enum.KeyCode.Unknown,   -- no auto-toggle; we control visibility
+        ConfigFolder = "ScorpTagEditor",
+        Starfield  = false,
+        CloseButton = true,    -- X button in the top-right
+        MinimizeButton = true, -- – button in the top-right bar
+    })
 
-    local function countKeys(t)
-        local n = 0
-        for _ in pairs(t) do n = n + 1 end
-        return n
-    end
+    -- Hide on first build; shown when Editor.Open() is called.
+    EditorWindow:SetVisible(false)
 
-    -- ── preview ──────────────────────────────────────────────────────────
+    local function notify(text) Scorp:Notify("Tag Editor", text, 3) end
+
+    -- ── preview & export ──────────────────────────────────────────────────
     local function updateExportViews()
         if not exportLabel then return end
         local n = countKeys(draft)
@@ -81,12 +101,12 @@ function TagEditor.Build(Window, Nametags)
         if previewFrame then pcall(function() previewFrame:Destroy() end) previewFrame = nil end
         if previewTween then pcall(function() previewTween:Cancel() end) previewTween = nil end
         if previewHolder then previewFrame, previewTween = Nametags.PreviewCard(previewHolder, draft) end
-        if worldPreview then Nametags.PreviewTag(draft) end
+        if worldPreview  then Nametags.PreviewTag(draft) end
         updateExportViews()
     end
 
     local gen = 0
-    local function scheduleRefresh()      -- sliders fire a lot; rebuild once they settle
+    local function scheduleRefresh()
         gen = gen + 1
         local mine = gen
         task.delay(0.12, function()
@@ -100,7 +120,6 @@ function TagEditor.Build(Window, Nametags)
         scheduleRefresh()
     end
 
-    --- Push the draft into every control (import, preset, reset).
     local function syncControls()
         loading = true
         for key, ctl in pairs(controls) do
@@ -129,48 +148,27 @@ function TagEditor.Build(Window, Nametags)
         loading = false
     end
 
-    -- ── tab ──────────────────────────────────────────────────────────────
-    local tab = Window:CreateTab("Tag Editor", { Icon = "🎨" })
+    -- ── tabs inside the editor window ─────────────────────────────────────
 
-    -- Live preview
+    -- Tab 1: Text & Font (most-used, shown first)
+    local tabText = EditorWindow:CreateTab("Text & Font", { Icon = "🔤" })
     do
-        local sec = tab:CreateSection("Live Preview", true)
-        previewHolder = sec:AddCustom(120)
-        sec:AddToggle("Show On My Tag", {
+        -- Live Preview section at the very top of this tab
+        local secPreview = tabText:CreateSection("LIVE PREVIEW", true)
+        previewHolder = secPreview:AddCustom(120)
+        secPreview:AddToggle("Show On My Tag", {
             Default = false, Bindable = false,
             Callback = function(v)
                 worldPreview = v and true or false
                 Nametags.PreviewTag(worldPreview and draft or nil)
             end,
         })
-        sec:AddButton("Reset Design", function()
+        secPreview:AddButton("Reset Design", function()
             applyDraft({})
-            notify("Design reset to the defaults.")
+            notify("Design reset to defaults.")
         end)
-    end
 
-    -- Presets
-    do
-        local sec = tab:CreateSection("Color Presets", true)
-        local options = { "Choose a preset..." }
-        for _, name in ipairs(DATA.presetOrder) do options[#options + 1] = name end
-        controls._preset = nil
-        sec:AddDropdown("Preset:", {
-            Options = options, Default = options[1],
-            Callback = function(v)
-                local preset = DATA.colorPresets[v]
-                if loading or not preset then return end
-                for _, k in ipairs(DATA.colorKeys) do draft[k] = nil end   -- a preset replaces the whole palette
-                for k, val in pairs(preset) do draft[k] = val end
-                syncControls()
-                notify(v .. " applied.")
-            end,
-        })
-    end
-
-    -- Text & Font
-    do
-        local sec = tab:CreateSection("Text & Font", true)
+        local sec = tabText:CreateSection("TEXT & FONT", true)
         controls.label = sec:AddTextbox("Label Text", {
             Default = "", Placeholder = "(role name)",
             Callback = function(text)
@@ -187,22 +185,33 @@ function TagEditor.Build(Window, Nametags)
                 setKey("userText", text:sub(1, 24))
             end,
         })
-        controls.rankFont = sec:AddDropdown("Rank Font:", { Options = DATA.fonts, Default = D.rankFont, Callback = function(v) setKey("rankFont", v) end })
-        controls.userFont = sec:AddDropdown("User Font:", { Options = DATA.fonts, Default = D.userFont, Callback = function(v) setKey("userFont", v) end })
-        controls.textSize = sec:AddSlider("Text Size", { Min = DATA.ranges.textSize[1], Max = DATA.ranges.textSize[2], Default = D.textSize, Increment = 1, Callback = function(v) setKey("textSize", v) end })
-    end
+        controls.rankFont = sec:AddDropdown("Rank Font", {
+            Options = DATA.fonts, Default = D.rankFont,
+            Callback = function(v) setKey("rankFont", v) end,
+        })
+        controls.userFont = sec:AddDropdown("User Font", {
+            Options = DATA.fonts, Default = D.userFont,
+            Callback = function(v) setKey("userFont", v) end,
+        })
+        controls.textSize = sec:AddSlider("Text Size", {
+            Min = DATA.ranges.textSize[1], Max = DATA.ranges.textSize[2],
+            Default = D.textSize, Increment = 1,
+            Callback = function(v) setKey("textSize", v) end,
+        })
 
-    -- Images
-    do
-        local sec = tab:CreateSection("Images", false)
-        for _, def in ipairs({ { "image", "Logo Image", "asset id (empty = your avatar)" }, { "background", "Background Image", "asset id (empty = none)" } }) do
+        -- Images sub-section
+        local secImg = tabText:CreateSection("IMAGES", false)
+        for _, def in ipairs({
+            { "image",      "Logo Image",       "asset id (empty = your avatar)" },
+            { "background", "Background Image",  "asset id (empty = none)"       },
+        }) do
             local key = def[1]
-            controls[key] = sec:AddTextbox(def[2], {
+            controls[key] = secImg:AddTextbox(def[2], {
                 Default = D[key], Placeholder = def[3],
                 Callback = function(text)
                     local asset = parseAsset(text)
                     if asset == nil then
-                        notify("That isn't an asset id. Use digits or rbxassetid://123456.")
+                        notify("Invalid asset id — use digits or rbxassetid://123456.")
                         revert(key)
                         return
                     end
@@ -212,51 +221,72 @@ function TagEditor.Build(Window, Nametags)
         end
     end
 
-    -- Layout
+    -- Tab 2: Colors & Effects
+    local tabFX = EditorWindow:CreateTab("Colors & FX", { Icon = "🎨" })
     do
-        local sec = tab:CreateSection("Layout", false)
-        local R = DATA.ranges
-        controls.fullWidth = sec:AddSlider("Card Width (0 = auto)", { Min = 0, Max = 300, Default = D.fullWidth, Increment = 2, Callback = function(v) setKey("fullWidth", v) end })
-        controls.fullHeight = sec:AddSlider("Card Height", { Min = R.fullHeight[1], Max = R.fullHeight[2], Default = D.fullHeight, Increment = 1, Callback = function(v) setKey("fullHeight", v) end })
-        controls.miniSize = sec:AddSlider("Mini Size", { Min = R.miniSize[1], Max = R.miniSize[2], Default = D.miniSize, Increment = 1, Callback = function(v) setKey("miniSize", v) end })
-        controls.offsetFull = sec:AddSlider("Height Offset (full)", { Min = 0, Max = 8, Default = D.offsetFull, Increment = 0.05, Callback = function(v) setKey("offsetFull", v) end })
-        controls.offsetMini = sec:AddSlider("Height Offset (mini)", { Min = 0, Max = 8, Default = D.offsetMini, Increment = 0.05, Callback = function(v) setKey("offsetMini", v) end })
-        controls.distFull = sec:AddSlider("Full Card Until (studs)", { Min = 5, Max = 400, Default = D.distFull, Increment = 1, Callback = function(v) setKey("distFull", v) end })
-        controls.distMini = sec:AddSlider("Logo Only From (studs)", { Min = 5, Max = 400, Default = D.distMini, Increment = 1, Callback = function(v) setKey("distMini", v) end })
-        controls.distMax = sec:AddSlider("Hidden Beyond (studs)", { Min = 50, Max = 10000, Default = D.distMax, Increment = 50, Callback = function(v) setKey("distMax", v) end })
-    end
+        -- Color presets
+        local secPresets = tabFX:CreateSection("COLOR PRESETS", true)
+        local presetOpts = { "Choose a preset..." }
+        for _, name in ipairs(DATA.presetOrder) do presetOpts[#presetOpts + 1] = name end
+        secPresets:AddDropdown("Preset", {
+            Options = presetOpts, Default = presetOpts[1],
+            Callback = function(v)
+                local preset = DATA.colorPresets[v]
+                if loading or not preset then return end
+                for _, k in ipairs(DATA.colorKeys) do draft[k] = nil end
+                for k, val in pairs(preset) do draft[k] = val end
+                syncControls()
+                notify(v .. " applied.")
+            end,
+        })
 
-    -- Colours (all 29)
-    do
-        local sec = tab:CreateSection("Colors", false)
+        -- All 29 colors
+        local secColors = tabFX:CreateSection("COLORS", false)
         for _, key in ipairs(DATA.colorKeys) do
-            controls[key] = sec:AddColorPicker(pretty(key), {
+            controls[key] = secColors:AddColorPicker(pretty(key), {
                 Default = Nametags.Color(D[key]),
                 Callback = function(c) setKey(key, Nametags.ColorToHex(c)) end,
             })
         end
-    end
 
-    -- Effects + animation
-    do
-        local sec = tab:CreateSection("Effects", false)
+        -- Effects toggles
+        local secFX = tabFX:CreateSection("EFFECTS", false)
         for _, key in ipairs({ "glow", "pulse", "spin", "particles", "underlineSweep", "glitch", "effects", "grid", "logoMotion" }) do
-            controls[key] = sec:AddToggle(pretty(key), {
+            controls[key] = secFX:AddToggle(pretty(key), {
                 Default = D[key], Bindable = false,
                 Callback = function(v) setKey(key, v and true or false) end,
             })
         end
-    end
-    do
-        local sec = tab:CreateSection("Animation", false)
-        controls.textAnimation = sec:AddDropdown("Text Animation:", { Options = DATA.animations, Default = D.textAnimation, Callback = function(v) setKey("textAnimation", v) end })
+
+        -- Text animation
+        local secAnim = tabFX:CreateSection("ANIMATION", false)
+        controls.textAnimation = secAnim:AddDropdown("Text Animation", {
+            Options = DATA.animations, Default = D.textAnimation,
+            Callback = function(v) setKey("textAnimation", v) end,
+        })
     end
 
-    -- Export / Import
+    -- Tab 3: Layout
+    local tabLayout = EditorWindow:CreateTab("Layout", { Icon = "📐" })
     do
-        local sec = tab:CreateSection("Export / Import", true)
+        local sec = tabLayout:CreateSection("LAYOUT", false)
+        local R = DATA.ranges
+        controls.fullWidth  = sec:AddSlider("Card Width (0 = auto)", { Min = 0, Max = 300, Default = D.fullWidth,  Increment = 2,    Callback = function(v) setKey("fullWidth",  v) end })
+        controls.fullHeight = sec:AddSlider("Card Height",            { Min = R.fullHeight[1], Max = R.fullHeight[2], Default = D.fullHeight, Increment = 1, Callback = function(v) setKey("fullHeight", v) end })
+        controls.miniSize   = sec:AddSlider("Mini Size",              { Min = R.miniSize[1],   Max = R.miniSize[2],   Default = D.miniSize,   Increment = 1, Callback = function(v) setKey("miniSize",   v) end })
+        controls.offsetFull = sec:AddSlider("Height Offset (full)",   { Min = 0, Max = 8, Default = D.offsetFull, Increment = 0.05, Callback = function(v) setKey("offsetFull", v) end })
+        controls.offsetMini = sec:AddSlider("Height Offset (mini)",   { Min = 0, Max = 8, Default = D.offsetMini, Increment = 0.05, Callback = function(v) setKey("offsetMini", v) end })
+        controls.distFull   = sec:AddSlider("Full Card Until (studs)", { Min = 5, Max = 400, Default = D.distFull, Increment = 1, Callback = function(v) setKey("distFull", v) end })
+        controls.distMini   = sec:AddSlider("Logo Only From (studs)",  { Min = 5, Max = 400, Default = D.distMini, Increment = 1, Callback = function(v) setKey("distMini", v) end })
+        controls.distMax    = sec:AddSlider("Hidden Beyond (studs)",   { Min = 50, Max = 10000, Default = D.distMax, Increment = 50, Callback = function(v) setKey("distMax", v) end })
+    end
+
+    -- Tab 4: Export / Import
+    local tabExport = EditorWindow:CreateTab("Export / Import", { Icon = "💾" })
+    do
+        local sec = tabExport:CreateSection("EXPORT / IMPORT", true)
         exportLabel = sec:AddLabel("Nothing changed yet — edit something and the code appears here.", { Wrap = true })
-        exportBox = sec:AddTextbox("Your Export Code", { Default = "", Placeholder = "(appears once you change something)", Callback = function() end })
+        exportBox   = sec:AddTextbox("Your Export Code", { Default = "", Placeholder = "(appears once you change something)", Callback = function() end })
         sec:AddButton("Copy Export Code", function()
             if countKeys(draft) == 0 then
                 notify("Nothing to export yet — change something first.")
@@ -264,10 +294,10 @@ function TagEditor.Build(Window, Nametags)
             end
             local code = Nametags.Export(draft)
             if copyToClipboard(code) then
-                notify("Export code copied (" .. #code .. " characters).")
+                notify("Copied (" .. #code .. " chars).")
             else
                 print("[Scorp] tag export code:\n" .. code)
-                notify("No clipboard access — the code was printed to the console (F9).")
+                notify("No clipboard access — code printed to F9 console.")
             end
         end)
         sec:AddTextbox("Import Code", {
@@ -283,24 +313,43 @@ function TagEditor.Build(Window, Nametags)
                 notify("Imported " .. countKeys(draft) .. " option(s).")
             end,
         })
+        sec:AddButton("Reset to Defaults", function()
+            applyDraft({})
+            notify("Design reset to defaults.")
+        end)
     end
 
+    -- Initial preview build
     rebuildPreview()
 
+    -- ── public API ────────────────────────────────────────────────────────
     local api = {}
+
+    function api.Open()
+        EditorWindow:SetVisible(true)
+    end
+
+    function api.Close()
+        EditorWindow:SetVisible(false)
+    end
+
     function api.GetDraft() return draft end
+
     function api.Export() return Nametags.Export(draft) end
+
     function api.Import(code)
         local options, err = Nametags.Import(code)
         if not options then return false, err end
         applyDraft(options)
         return true
     end
-    --- Called when the UI unloads: stop the in-world preview and the preview's tween.
+
     function api.Destroy()
         if previewTween then pcall(function() previewTween:Cancel() end) previewTween = nil end
         Nametags.PreviewTag(nil)
+        pcall(function() EditorWindow:Destroy(true) end)
     end
+
     return api
 end
 
