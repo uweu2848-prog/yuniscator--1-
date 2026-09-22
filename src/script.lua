@@ -48,17 +48,31 @@ end
 --  Window
 -- ───────────────────────────────────────────────────────────────────────────
 local Window = Scorp:CreateWindow({
-    Title        = "Scorp",
-    Subtitle     = "A Out Of Space Experience  ·  v0.1",
-    Theme        = "Sharp Silver",
+    Title        = "SCORP",
+    Subtitle     = "Deep Space · Made By Yuniku · v0.1",
+    Theme        = "Cosmic Void",
     ToggleKey    = Enum.KeyCode.RightShift,
     UnloadKey    = Enum.KeyCode.Delete,
-    WidgetText   = "Scorp",
+    WidgetText   = "SCORP",
+    LogoIcon     = "✦",
     ConfigFolder = "Scorp",
-    Starfield    = false,
+    BackgroundImage = "rbxassetid://0",
+    BackgroundImageTransparency = 0.5,
 })
 
 Window:SetWatermark('<font color="rgb(168,186,214)">Scorp</font>  ·  placeholder build')
+
+-- Start nametag sync BEFORE building the tag editor below, so its "load my saved
+-- design" step has a real session (cfg) to sync with instead of racing it.
+ctx.revoke = function()
+    pcall(function() Window:Destroy(true) end)
+end
+Nametags.Start({
+    ctx = ctx,
+    request = ctx.request,
+    server = ctx.server,
+    onRevoked = function() ctx.revoke() end,
+})
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Home
@@ -148,9 +162,12 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 --  Settings
 -- ───────────────────────────────────────────────────────────────────────────
--- Tag Editor: its own standalone window (Editor.Open() shows it), not a tab buried in
--- the main menu — see the header comment in src/tageditor.lua.
-local Editor = TagEditor.Build(Scorp, Nametags)
+-- Tag Editor: its own standalone window (not a sidebar tab) — opened from the
+-- info bar's 🏷️ button, or from Settings below. Save My Tag persists it server-side.
+local EditorPanel = Window:CreatePopout({
+    Name = "TagEditor", Title = "🎨  Nametag Editor", Size = UDim2.fromOffset(460, 560),
+})
+local Editor = TagEditor.Build(Window, Nametags, { Host = EditorPanel })
 
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
@@ -163,7 +180,31 @@ do
         Default  = Window.ToggleKey,
         OnChange = function(key) Window:SetToggleKey(key) end,
     })
+    sec:AddButton("Open Nametag Editor", function() Editor.Show() end)
 end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Info bar — player count (+1/-1 on join/leave), ping, fps, and quick icons.
+--  Always visible, independent of the main panel — set DISCORD_INVITE below to
+--  wire up the 💬 button (defaults to just copying the invite link to clipboard).
+-- ───────────────────────────────────────────────────────────────────────────
+local DISCORD_INVITE = "https://discord.gg/YOUR_INVITE_HERE"
+
+local InfoBar = Window:CreateInfoBar({
+    OnSettings = function()
+        Window:Toggle(true)
+        Window:SelectTab(Settings)
+    end,
+    OnNametag = function() Editor.Toggle() end,
+    OnDiscord = function()
+        local fn = setclipboard or toclipboard
+        if type(fn) == "function" and pcall(fn, DISCORD_INVITE) then
+            Window:Notify("Discord", "Invite link copied to clipboard.", 3)
+        else
+            Window:Notify("Discord", DISCORD_INVITE, 5)
+        end
+    end,
+})
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Nametag settings
@@ -193,32 +234,17 @@ do
         Nametags.Refresh()
         Window:Notify("Nametags", "Refreshing…", 2)
     end)
-    sec:AddButton("Edit Nametag", function()
-        Editor.Open()
-    end)
 end
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Session hooks + cleanup
 -- ───────────────────────────────────────────────────────────────────────────
--- The loader calls this if the server revokes the session mid-run.
-ctx.revoke = function()
-    pcall(function() Window:Destroy(true) end)
-end
-
 Window:OnUnload(function()
     print("[Scorp] unloaded")
     pcall(Editor.Destroy)
+    pcall(function() if EditorPanel.Frame then EditorPanel.Frame:Destroy() end end)
+    pcall(InfoBar.Destroy)
     Nametags.Stop()
 end)
-
-Nametags.Start({
-    ctx = ctx,
-    request = ctx.request,
-    server = ctx.server,
-    onRevoked = function() ctx.revoke() end,
-    notify = function(title, desc, duration) Window:Notify(title, desc, duration) end,
-})
-Nametags.CreateHudButton()
 
 Window:Notify("Scorp", "Loaded. Press " .. Window.ToggleKey.Name .. " to toggle.", 4)
