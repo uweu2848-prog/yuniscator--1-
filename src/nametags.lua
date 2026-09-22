@@ -845,68 +845,20 @@ function Nametags.PreviewCard(parent, overrides, role)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
---  STANDALONE WEB EDITOR  (mois7-style: opens as a real browser tab, not an
---  in-game one — the executor can't launch a browser itself, so this mints a
---  short-lived link and copies it to the clipboard, same trick mois7 uses)
+--  HUD button: small "M7" pill in a corner, pops a card with hide/edit tag —
+--  "edit tag" opens the standalone in-game editor window (see script.lua /
+--  tageditor.lua), never a browser. onEdit is called when that button is pressed.
 -- ═══════════════════════════════════════════════════════════════════════════
-local function copyToClipboard(text)
-    local fn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-    if type(fn) ~= "function" then return false end
-    return (pcall(fn, text))
-end
-
---- callback(url) on success, callback(nil, err) on failure. Never blocks the caller.
-function Nametags.RequestEditorLink(callback)
-    if not cfg then callback(nil, "not connected") return end
-    task.spawn(function()
-        local ok, res = pcall(cfg.request, {
-            Url = cfg.server .. "/api/nametags/editor-link",
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["Authorization"] = "Bearer " .. tostring(cfg.ctx.token),
-            },
-            Body = "{}",
-        })
-        if not ok or type(res) ~= "table" or res.StatusCode ~= 200 or not res.Body then
-            callback(nil, "couldn't reach the server")
-            return
-        end
-        local decoded, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
-        if not decoded or type(data) ~= "table" or not data.url then
-            callback(nil, "bad response")
-            return
-        end
-        callback(data.url)
-    end)
-end
-
---- Gets a link and copies it to the clipboard, then notifies the player.
-function Nametags.OpenEditor()
-    Nametags.RequestEditorLink(function(url, err)
-        if not (cfg and cfg.notify) then return end
-        if not url then
-            cfg.notify("Nametag", "Couldn't get an editor link — " .. tostring(err), 4)
-        elseif copyToClipboard(url) then
-            cfg.notify("Nametag", "Editor link copied — paste it into your browser.", 5)
-        else
-            cfg.notify("Nametag", "Your executor can't copy text. Editor link: " .. url, 10)
-        end
-    end)
-end
-
--- ── HUD button: small "M7" pill in a corner, pops a card with hide/edit tag ──
--- Mirrors mois7's own nametag popup — "edit tag" opens the standalone web editor above.
 local hud = nil
-function Nametags.CreateHudButton()
+function Nametags.CreateHudButton(onEdit)
     if hud then return end
     -- Button/click events aren't guaranteed everywhere (e.g. a headless test harness),
     -- so this never takes the rest of the script down with it.
-    local ok, err = pcall(Nametags._buildHudButton)
+    local ok, err = pcall(Nametags._buildHudButton, onEdit)
     if not ok then warn("[Scorp] couldn't create the nametag HUD button: " .. tostring(err)) end
 end
 
-function Nametags._buildHudButton()
+function Nametags._buildHudButton(onEdit)
     local gui = Instance.new("ScreenGui")
     gui.Name = "ScorpNametagHud"
     gui.ResetOnSpawn = false
@@ -986,16 +938,20 @@ function Nametags._buildHudButton()
         card.Visible = v
     end
 
-    pill.MouseButton1Click:Connect(function() setOpen(not open) end)
-    hideBtn.MouseButton1Click:Connect(function()
+    local function safeClick(btn, fn)
+        local sig = btn and btn.MouseButton1Click
+        if sig and type(sig.Connect) == "function" then sig:Connect(fn) end
+    end
+    safeClick(pill, function() setOpen(not open) end)
+    safeClick(hideBtn, function()
         S.ShowSelf = not S.ShowSelf
         hideBtn.Text = S.ShowSelf and "hide tag" or "show tag"
         render()
         setOpen(false)
     end)
-    editBtn.MouseButton1Click:Connect(function()
+    safeClick(editBtn, function()
         setOpen(false)
-        Nametags.OpenEditor()
+        if onEdit then onEdit() end
     end)
 
     hud = gui
