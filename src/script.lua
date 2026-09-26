@@ -45,15 +45,13 @@ if Scorp.CreateSplash then
     task.wait()
 end
 
-local function stub(name)
-    return function(value)
-        print(("[Scorp] %s -> %s"):format(name, tostring(value)))
-    end
-end
-
 local Features = (function()
 --@include features.lua
 end)()
+
+local function note(title, text, bad)
+    Window:Notify(title, tostring(text or ""), 3, bad and Window.Theme.Danger or nil)
+end
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Window
@@ -89,88 +87,21 @@ Nametags.Start({
 -- ───────────────────────────────────────────────────────────────────────────
 --  Home
 -- ───────────────────────────────────────────────────────────────────────────
-local Home = Window:CreateTab("Home", { Icon = "🏄" })
+local Home = Window:CreateTab("Home", { Icon = "🏠" })
 
 do
-    local sec = Home:CreateSection("Welcome", true)
-    sec:AddLabel("Scorp is running. Everything here is a placeholder.", { Wrap = true })
-    sec:AddLabel("Made by YOUR_NAME", { Color = Window.Theme.TextDim })
-    sec:AddButton("Test Notification", function()
-        Window:Notify("Scorp", "Notifications are working.", 3)
-    end)
-    sec:AddButton("Success Notification", function()
-        Window:Notify("Done", "This one uses the success colour.", 3, Window.Theme.Success)
-    end)
-end
-
-do
-    local sec = Home:CreateSection("Cosmic Core", true)
-    sec:AddToggle("Placeholder Feature 1", { Flag = "core_1", Callback = stub("Placeholder Feature 1") })
-    sec:AddToggle("Placeholder Feature 2", { Bindable = false, Flag = "core_2", Callback = stub("Placeholder Feature 2") })
-    sec:AddToggle("Placeholder Feature 3", { Bindable = false, Flag = "core_3", Callback = stub("Placeholder Feature 3") })
-    sec:AddSlider("Power Level", {
-        Min = 0, Max = 100, Default = 50, Increment = 1, Suffix = "%",
-        Flag = "core_power", Callback = stub("Power Level"),
-    })
-    sec:AddDropdown("Mode:", {
-        Options = { "Mode A", "Mode B", "Mode C" }, Default = "Mode A",
-        Flag = "core_mode", Callback = stub("Mode"),
-    })
+    local sec = Home:CreateSection("Scorp", true)
+    sec:AddLabel("Made by Yuniku.", { Wrap = true })
+    sec:AddLabel("K hides the menu. Delete unloads it. The key chip on a row changes that bind.", { Wrap = true, Color = Window.Theme.TextDim })
 end
 
 -- ───────────────────────────────────────────────────────────────────────────
---  Player
+--  Movement
 -- ───────────────────────────────────────────────────────────────────────────
-local Player = Window:CreateTab("Player", { Icon = "🌠" })
+local Movement = Window:CreateTab("Movement", { Icon = "🏃" })
 
 do
-    local sec = Player:CreateSection("Movement", true)
-    sec:AddToggle("Movement Toggle 1", { Bindable = false, Flag = "move_1", Callback = stub("Movement Toggle 1") })
-    sec:AddToggle("Movement Toggle 2", { Bindable = false, Flag = "move_2", Callback = stub("Movement Toggle 2") })
-    sec:AddSlider("Value Slider 1", { Min = 0, Max = 100, Default = 16, Flag = "move_v1", Callback = stub("Value Slider 1") })
-    sec:AddSlider("Value Slider 2", { Min = 0, Max = 200, Default = 50, Flag = "move_v2", Callback = stub("Value Slider 2") })
-end
-
-do
-    local sec = Player:CreateSection("Character", false)
-    sec:AddToggle("Character Toggle", { Bindable = false, Flag = "char_1", Callback = stub("Character Toggle") })
-    sec:AddButton("Character Button", stub("Character Button"))
-    sec:AddKeybind("Character Keybind", { Default = Enum.KeyCode.F, Flag = "char_key", Callback = stub("Character Keybind") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Visuals
--- ───────────────────────────────────────────────────────────────────────────
-local Visuals = Window:CreateTab("Visuals", { Icon = "☄️" })
-
-do
-    local sec = Visuals:CreateSection("Glow", true)
-    sec:AddToggle("Enable Glow", { Bindable = false, Flag = "vis_glow", Callback = stub("Enable Glow") })
-    sec:AddColorPicker("Glow Color", {
-        Default = Color3.fromRGB(90, 210, 255), Flag = "vis_glow_color", Callback = stub("Glow Color"),
-    })
-    sec:AddSlider("Glow Strength", { Min = 0, Max = 100, Default = 40, Suffix = "%", Flag = "vis_glow_str", Callback = stub("Glow Strength") })
-end
-
-do
-    local sec = Visuals:CreateSection("Overlay", false)
-    sec:AddToggle("Overlay Toggle 1", { Bindable = false, Flag = "vis_o1", Callback = stub("Overlay Toggle 1") })
-    sec:AddToggle("Overlay Toggle 2", { Bindable = false, Flag = "vis_o2", Callback = stub("Overlay Toggle 2") })
-    sec:AddDropdown("Style:", { Options = { "Style 1", "Style 2", "Style 3" }, Default = "Style 1", Flag = "vis_style", Callback = stub("Style") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Misc
--- ───────────────────────────────────────────────────────────────────────────
-local Misc = Window:CreateTab("Misc", { Icon = "🌌" })
-
-local function note(title, text, bad)
-    Window:Notify(title, tostring(text or ""), 3, bad and Window.Theme.Danger or nil)
-end
-
-do
-    local sec = Misc:CreateSection("Movement", true)
-    sec:AddLabel("Click the key chip on a row to rebind it. Defaults: C speed, X fly, G gravity, F click TP, K menu.")
+    local sec = Movement:CreateSection("Speed", true)
     sec:AddToggle("CFrame movement", {
         Keybind = Enum.KeyCode.C, Flag = "misc_cframe",
         Callback = function(on) Features.SetCFrame(on) end,
@@ -179,6 +110,14 @@ do
         Min = 0, Max = 500, Default = 16, Increment = 1, Flag = "misc_cframe_speed",
         Callback = function(v) Features.SetCFrameSpeed(v) end,
     })
+    sec:AddSlider("Walk speed", {
+        Min = 0, Max = 500, Default = 16, Increment = 1, Flag = "misc_ws",
+        Callback = function(v) Features.SetWalkSpeed(v) end,
+    })
+end
+
+do
+    local sec = Movement:CreateSection("Flight", true)
     sec:AddToggle("Fly", {
         Keybind = Enum.KeyCode.X, Flag = "misc_fly",
         Callback = function(on) Features.SetFly(on) end,
@@ -195,14 +134,14 @@ do
         Bindable = true, Flag = "misc_infjump",
         Callback = function(on) Features.SetInfJump(on) end,
     })
-    sec:AddSlider("Walk speed", {
-        Min = 0, Max = 500, Default = 16, Increment = 1, Flag = "misc_ws",
-        Callback = function(v) Features.SetWalkSpeed(v) end,
-    })
     sec:AddSlider("Jump power", {
         Min = 0, Max = 500, Default = 50, Increment = 1, Flag = "misc_jp",
         Callback = function(v) Features.SetJumpPower(v) end,
     })
+end
+
+do
+    local sec = Movement:CreateSection("Spin", true)
     sec:AddToggle("Spin", {
         Bindable = true, Flag = "misc_spin",
         Callback = function(on) Features.SetSpin(on) end,
@@ -214,46 +153,94 @@ do
 end
 
 do
-    local sec = Misc:CreateSection("World", false)
-    sec:AddToggle("Custom gravity", {
-        Keybind = Enum.KeyCode.G, Flag = "misc_grav",
-        Callback = function(on) Features.SetGravity(on) end,
+    local sec = Movement:CreateSection("Hover", true)
+    sec:AddToggle("Airwalk", {
+        Bindable = true, Flag = "misc_air",
+        Callback = function(on) Features.SetAirwalk(on) end,
     })
-    sec:AddSlider("Gravity", {
-        Min = 0, Max = 500, Default = 196, Increment = 1, Flag = "misc_grav_v",
-        Callback = function(v) Features.SetCustomGravity(v) end,
+    sec:AddSlider("Airwalk offset", {
+        Min = -20, Max = 20, Default = 3, Increment = 1, Flag = "misc_air_off",
+        Callback = function(v) Features.SetAirOffset(v) end,
     })
-    sec:AddToggle("Fullbright", {
-        Bindable = true, Flag = "misc_fb",
-        Callback = function(on) Features.SetFullbright(on) end,
+    sec:AddToggle("Platform hover", {
+        Bindable = true, Flag = "misc_plat",
+        Callback = function(on) Features.SetPlatform(on) end,
     })
-    sec:AddToggle("No fog", {
-        Bindable = true, Flag = "misc_nofog",
-        Callback = function(on) Features.SetNoFog(on) end,
+    sec:AddSlider("Hip height", {
+        Min = 0, Max = 100, Default = 0, Increment = 1, Flag = "misc_hip",
+        Callback = function(v) Features.SetHip(v) end,
     })
-    sec:AddToggle("X-ray", {
-        Bindable = true, Flag = "misc_xray",
-        Callback = function(on) Features.SetXray(on) end,
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Players
+-- ───────────────────────────────────────────────────────────────────────────
+local PlayersTab = Window:CreateTab("Players", { Icon = "👤" })
+local playerBox
+
+do
+    local sec = PlayersTab:CreateSection("Target", true)
+    playerBox = sec:AddTextbox("Player", {
+        Placeholder = "name or display name", Flag = "misc_player", CallOnBlur = true,
     })
-    sec:AddToggle("Anti-fling", {
-        Bindable = true, Flag = "misc_antifling",
-        Callback = function(on) Features.SetAntifling(on) end,
-    })
-    sec:AddSlider("FOV", {
-        Min = 1, Max = 120, Default = 70, Increment = 1, Flag = "misc_fov",
-        Callback = function(v) Features.SetFov(v) end,
-    })
-    sec:AddToggle("Lock FOV", {
-        Bindable = true, Flag = "misc_lockfov",
-        Callback = function(on) Features.SetLockFov(on) end,
-    })
-    sec:AddButton("Infbaseplate", function()
-        note("World", Features.ToggleInfBaseplate())
-    end)
+    sec:AddButton("Teleport", function() note("Players", Features.TeleportTo(playerBox:Get())) end)
+    sec:AddButton("Behind", function() note("Players", Features.Behind(playerBox:Get())) end)
+    sec:AddButton("Spectate / stop", function() note("Players", Features.Spectate(playerBox:Get())) end)
 end
 
 do
-    local sec = Misc:CreateSection("ESP", false)
+    local sec = PlayersTab:CreateSection("Attach", true)
+    sec:AddLabel("Uses the name in Target.", { Color = Window.Theme.TextDim })
+    sec:AddButton("Head sit", function() note("Players", Features.SetCarry("head", playerBox:Get())) end)
+    sec:AddButton("Backpack", function() note("Players", Features.SetCarry("back", playerBox:Get())) end)
+    sec:AddButton("Focus TP", function() note("Players", Features.SetCarry("focus", playerBox:Get())) end)
+end
+
+do
+    local sec = PlayersTab:CreateSection("Coordinates", true)
+    local xBox = sec:AddTextbox("X", { Placeholder = "X", Flag = "misc_x" })
+    local yBox = sec:AddTextbox("Y", { Placeholder = "Y", Flag = "misc_y" })
+    local zBox = sec:AddTextbox("Z", { Placeholder = "Z", Flag = "misc_z" })
+    sec:AddButton("TP to coords", function()
+        note("Players", Features.TeleportCoords(xBox:Get(), yBox:Get(), zBox:Get()))
+    end)
+    sec:AddButton("Get position", function()
+        local s = Features.GetPos()
+        if not s then note("Players", "no character", true) return end
+        local x, y, z = string.match(s, "^(-?[%d%.]+),%s*(-?[%d%.]+),%s*(-?[%d%.]+)$")
+        if x then
+            xBox:Set(x, true)
+            yBox:Set(y, true)
+            zBox:Set(z, true)
+        end
+        local fn = setclipboard or toclipboard
+        if type(fn) == "function" then pcall(fn, s) end
+        note("Players", s)
+    end)
+    sec:AddKeybind("Click TP", {
+        Default = Enum.KeyCode.F, Flag = "misc_clicktp",
+        Callback = function()
+            local msg = Features.ClickTP()
+            if msg then note("Click TP", msg, true) end
+        end,
+    })
+end
+
+do
+    local sec = PlayersTab:CreateSection("Self", true)
+    sec:AddToggle("Invisible (client)", {
+        Bindable = true, Flag = "misc_invis",
+        Callback = function(on) Features.SetInvisible(on) end,
+    })
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Visuals
+-- ───────────────────────────────────────────────────────────────────────────
+local Visuals = Window:CreateTab("Visuals", { Icon = "👁️" })
+
+do
+    local sec = Visuals:CreateSection("ESP", true)
     sec:AddToggle("ESP", {
         Bindable = true, Flag = "misc_esp",
         Callback = function(on)
@@ -281,7 +268,7 @@ do
 end
 
 do
-    local sec = Misc:CreateSection("Hitbox", false)
+    local sec = Visuals:CreateSection("Hitbox", true)
     sec:AddToggle("Hitbox extender", {
         Bindable = true, Flag = "misc_hb",
         Callback = function(on) Features.SetHitbox(on) end,
@@ -297,123 +284,134 @@ do
 end
 
 do
-    local sec = Misc:CreateSection("Players", false)
-    local playerBox = sec:AddTextbox("Player", {
-        Placeholder = "name or display name", Flag = "misc_player", CallOnBlur = true,
+    local sec = Visuals:CreateSection("Lighting", true)
+    sec:AddToggle("Fullbright", {
+        Bindable = true, Flag = "misc_fb",
+        Callback = function(on) Features.SetFullbright(on) end,
     })
-    local xBox = sec:AddTextbox("X", { Placeholder = "X", Flag = "misc_x" })
-    local yBox = sec:AddTextbox("Y", { Placeholder = "Y", Flag = "misc_y" })
-    local zBox = sec:AddTextbox("Z", { Placeholder = "Z", Flag = "misc_z" })
-    local function q() return playerBox:Get() end
-    sec:AddButton("Teleport", function() note("Players", Features.TeleportTo(q())) end)
-    sec:AddButton("Spectate / stop", function() note("Players", Features.Spectate(q())) end)
-    sec:AddButton("Head sit", function() note("Players", Features.SetCarry("head", q())) end)
-    sec:AddButton("Backpack", function() note("Players", Features.SetCarry("back", q())) end)
-    sec:AddButton("Focus TP", function() note("Players", Features.SetCarry("focus", q())) end)
-    sec:AddButton("Behind", function() note("Players", Features.Behind(q())) end)
-    sec:AddButton("TP to coords", function()
-        note("Players", Features.TeleportCoords(xBox:Get(), yBox:Get(), zBox:Get()))
-    end)
-    sec:AddButton("Get position", function()
-        local s = Features.GetPos()
-        if not s then note("Players", "no character", true) return end
-        local x, y, z = string.match(s, "^(-?[%d%.]+),%s*(-?[%d%.]+),%s*(-?[%d%.]+)$")
-        if x then
-            xBox:Set(x, true)
-            yBox:Set(y, true)
-            zBox:Set(z, true)
-        end
-        local fn = setclipboard or toclipboard
-        if type(fn) == "function" then pcall(fn, s) end
-        note("Players", s)
-    end)
-    sec:AddKeybind("Click TP", {
-        Default = Enum.KeyCode.F, Flag = "misc_clicktp",
-        Callback = function()
-            local msg = Features.ClickTP()
-            if msg then note("Click TP", msg, true) end
-        end,
+    sec:AddToggle("No fog", {
+        Bindable = true, Flag = "misc_nofog",
+        Callback = function(on) Features.SetNoFog(on) end,
+    })
+    sec:AddToggle("X-ray", {
+        Bindable = true, Flag = "misc_xray",
+        Callback = function(on) Features.SetXray(on) end,
     })
 end
 
 do
-    local sec = Misc:CreateSection("Camera", false)
+    local sec = Visuals:CreateSection("Camera", true)
     sec:AddToggle("Freecam", {
         Bindable = true, Flag = "misc_fc",
         Callback = function(on) Features.SetFreecam(on) end,
+    })
+    sec:AddSlider("FOV", {
+        Min = 1, Max = 120, Default = 70, Increment = 1, Flag = "misc_fov",
+        Callback = function(v) Features.SetFov(v) end,
+    })
+    sec:AddToggle("Lock FOV", {
+        Bindable = true, Flag = "misc_lockfov",
+        Callback = function(on) Features.SetLockFov(on) end,
     })
     sec:AddButton("First person", function() Features.FirstPerson() note("Camera", "first person") end)
     sec:AddButton("Third person", function() Features.ThirdPerson() note("Camera", "third person") end)
     sec:AddButton("Reset camera", function() Features.FixCam() note("Camera", "camera reset") end)
 end
 
+-- ───────────────────────────────────────────────────────────────────────────
+--  World
+-- ───────────────────────────────────────────────────────────────────────────
+local World = Window:CreateTab("World", { Icon = "🌍" })
+
 do
-    local sec = Misc:CreateSection("Extra", false)
-    sec:AddToggle("Airwalk", {
-        Bindable = true, Flag = "misc_air",
-        Callback = function(on) Features.SetAirwalk(on) end,
+    local sec = World:CreateSection("Gravity", true)
+    sec:AddToggle("Custom gravity", {
+        Keybind = Enum.KeyCode.G, Flag = "misc_grav",
+        Callback = function(on) Features.SetGravity(on) end,
     })
-    sec:AddSlider("Airwalk offset", {
-        Min = -20, Max = 20, Default = 3, Increment = 1, Flag = "misc_air_off",
-        Callback = function(v) Features.SetAirOffset(v) end,
+    sec:AddSlider("Gravity", {
+        Min = 0, Max = 500, Default = 196, Increment = 1, Flag = "misc_grav_v",
+        Callback = function(v) Features.SetCustomGravity(v) end,
     })
-    sec:AddToggle("Platform hover", {
-        Bindable = true, Flag = "misc_plat",
-        Callback = function(on) Features.SetPlatform(on) end,
-    })
-    sec:AddSlider("Hip height", {
-        Min = 0, Max = 100, Default = 0, Increment = 1, Flag = "misc_hip",
-        Callback = function(v) Features.SetHip(v) end,
+end
+
+do
+    local sec = World:CreateSection("Safety", true)
+    sec:AddToggle("Anti-fling", {
+        Bindable = true, Flag = "misc_antifling",
+        Callback = function(on) Features.SetAntifling(on) end,
     })
     sec:AddToggle("Anti-void", {
         Bindable = true, Flag = "misc_void",
         Callback = function(on) Features.SetAntivoid(on) end,
     })
-    sec:AddToggle("Invisible (client)", {
-        Bindable = true, Flag = "misc_invis",
-        Callback = function(on) Features.SetInvisible(on) end,
-    })
 end
 
 do
-    local sec = Misc:CreateSection("Staff panel", false)
+    local sec = World:CreateSection("Map", true)
+    sec:AddButton("Infbaseplate", function()
+        note("World", Features.ToggleInfBaseplate())
+    end)
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Staff
+-- ───────────────────────────────────────────────────────────────────────────
+local Staff = Window:CreateTab("Staff", { Icon = "🛡️" })
+
+local staffTarget
+local function staffAct(cmd, label)
+    local ok, msg = Features.StaffAction(cmd, staffTarget:Get())
+    note("Staff", ok and (label .. " sent") or msg, not ok)
+end
+
+do
+    local sec = Staff:CreateSection("Target", true)
     local status = sec:AddLabel("Staff: loading…", { Wrap = true, Color = Window.Theme.TextDim })
     task.spawn(function()
         Features.Start({ request = ctx.request })
         status:Set(Features.StaffStatus())
     end)
-    local targetBox = sec:AddTextbox("Target", {
+    staffTarget = sec:AddTextbox("Target", {
         Placeholder = "username (blank = everyone)", Flag = "misc_staff_target", CallOnBlur = true,
     })
-    local function act(cmd, label)
-        local ok, msg = Features.StaffAction(cmd, targetBox:Get())
-        note("Staff", ok and (label .. " sent") or msg, not ok)
-    end
     sec:AddButton("Refresh staff list", function()
         local msg = Features.RefreshStaff()
         status:Set(msg)
         note("Staff", msg, not Features.IsStaff())
     end)
-    sec:AddButton("Flywheel", function() act("fw", "flywheel") end)
-    sec:AddButton("Freeze", function() act("frz", "freeze") end)
-    sec:AddButton("Unfreeze", function() act("thw", "unfreeze") end)
-    sec:AddButton("Fling", function() act("flg", "fling") end)
-    sec:AddButton("Sit", function() act("sit", "sit") end)
-    sec:AddButton("Jump", function() act("jmp", "jump") end)
+end
+
+do
+    local sec = Staff:CreateSection("Move", true)
+    sec:AddButton("Flywheel", function() staffAct("fw", "flywheel") end)
     sec:AddButton("Bring to me", function()
-        if targetBox:Get() == "" then
+        if staffTarget:Get() == "" then
             note("Staff", "bring needs a specific player", true)
             return
         end
-        act("brg", "bring")
+        staffAct("brg", "bring")
     end)
-    sec:AddButton("Void", function() act("vod", "void") end)
-    sec:AddButton("Reset", function() act("rst", "reset") end)
-    sec:AddButton("Blind", function() act("bld", "blind") end)
-    sec:AddButton("Unblind", function() act("ubl", "unblind") end)
-    sec:AddButton("Kick", function() act("kck", "kick") end)
-    sec:AddButton("Spin on", function() act("spn", "spin") end)
-    sec:AddButton("Spin off", function() act("usp", "unspin") end)
+    sec:AddButton("Sit", function() staffAct("sit", "sit") end)
+    sec:AddButton("Jump", function() staffAct("jmp", "jump") end)
+    sec:AddButton("Spin on", function() staffAct("spn", "spin") end)
+    sec:AddButton("Spin off", function() staffAct("usp", "unspin") end)
+end
+
+do
+    local sec = Staff:CreateSection("Control", true)
+    sec:AddButton("Freeze", function() staffAct("frz", "freeze") end)
+    sec:AddButton("Unfreeze", function() staffAct("thw", "unfreeze") end)
+    sec:AddButton("Blind", function() staffAct("bld", "blind") end)
+    sec:AddButton("Unblind", function() staffAct("ubl", "unblind") end)
+end
+
+do
+    local sec = Staff:CreateSection("Remove", true)
+    sec:AddButton("Fling", function() staffAct("flg", "fling") end)
+    sec:AddButton("Void", function() staffAct("vod", "void") end)
+    sec:AddButton("Reset", function() staffAct("rst", "reset") end)
+    sec:AddButton("Kick", function() staffAct("kck", "kick") end)
 end
 
 local Keybinds = Window:CreateTab("Keybinds", { Icon = "⌨️" })
