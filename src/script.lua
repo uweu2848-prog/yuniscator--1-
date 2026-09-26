@@ -38,6 +38,13 @@ local Scorp = libFn()
 assert(Scorp, "[Scorp] UI library ran but returned nothing.")
 ctx.lib = nil -- don't keep the library source sitting in the shared table
 
+local Window
+local splash
+if Scorp.CreateSplash then
+    splash = Scorp:CreateSplash({ Kind = "load" })
+    task.wait()
+end
+
 local function stub(name)
     return function(value)
         print(("[Scorp] %s -> %s"):format(name, tostring(value)))
@@ -51,7 +58,7 @@ end)()
 -- ───────────────────────────────────────────────────────────────────────────
 --  Window
 -- ───────────────────────────────────────────────────────────────────────────
-local Window = Scorp:CreateWindow({
+Window = Scorp:CreateWindow({
     Title        = "SCORP",
     Subtitle     = "Made By Yuniku",
     Theme        = "Rayfield",
@@ -62,6 +69,7 @@ local Window = Scorp:CreateWindow({
     WidgetText   = "SCORP",
     LogoIcon     = "✦",
     ConfigFolder = "Scorp",
+    StartHidden  = splash ~= nil,
 })
 
 Window:SetWatermark('<font color="rgb(80,105,255)">Scorp</font>  ·  Made By Yuniku')
@@ -501,5 +509,15 @@ Window:OnUnload(function()
     Nametags.Stop()
 end)
 
-local toggleName = (Window.ToggleKey and Window.ToggleKey.Name) or "None"
-Window:Notify("Scorp", "Loaded. Press " .. toggleName .. " to toggle.", 4)
+local function announce()
+    local toggleName = (Window.ToggleKey and Window.ToggleKey.Name) or "None"
+    Window:Notify("Scorp", "Loaded. Press " .. toggleName .. " to toggle.", 4)
+end
+if splash then
+    splash:Play(function()
+        Window:Toggle(true)
+        announce()
+    end)
+else
+    announce()
+end

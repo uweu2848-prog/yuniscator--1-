@@ -854,6 +854,9 @@ app.post('/api/nametags/editor-link', editorLinkLimiter, requireToken, (req, res
 });
 
 app.get('/tag', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'tag-editor.html')));
+app.get('/brand/scorp-logo.png', (_req, res) => {
+    res.type('image/jpeg').sendFile(path.join(ROOT, 'public', 'scorp-logo.png'));
+});
 
 app.get('/api/tag-session/:code', requireEditorCode, (req, res) => {
     res.json({
