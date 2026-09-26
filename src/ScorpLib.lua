@@ -73,8 +73,16 @@ Library.Themes = {
                           MainBg = Color3.fromRGB(8, 22, 30), SidebarBg = Color3.fromRGB(6, 16, 23), ToggleOff = Color3.fromRGB(18, 38, 48) },
     ["Deep Space"]    = { Accent = Color3.fromRGB(122, 132, 152), AccentLight = Color3.fromRGB(205, 214, 232),
                           MainBg = Color3.fromRGB(12, 13, 17), SidebarBg = Color3.fromRGB(8, 9, 12), ToggleOff = Color3.fromRGB(26, 28, 36) },
+    -- Flat shell: near-black surfaces, one blue accent, hairline outline.
+    ["Rayfield"] = {
+        Accent = Color3.fromRGB(80, 105, 255), AccentLight = Color3.fromRGB(140, 156, 255),
+        MainBg = Color3.fromRGB(15, 15, 19), SidebarBg = Color3.fromRGB(8, 8, 10),
+        ToggleOff = Color3.fromRGB(26, 26, 32), TextWhite = Color3.fromRGB(237, 237, 242),
+        TextDim = Color3.fromRGB(139, 139, 147), Danger = Color3.fromRGB(235, 76, 76),
+        Stroke = Color3.fromRGB(46, 46, 54),
+    },
 }
-Library.ThemeOrder = { "Nova Silver", "Silver Surfer", "Power Cosmic", "Zenn-La", "Deep Space" }
+Library.ThemeOrder = { "Rayfield", "Nova Silver", "Silver Surfer", "Power Cosmic", "Zenn-La", "Deep Space" }
 
 --- Add your own preset: Library:RegisterTheme("Sunset", { Accent = Color3.fromRGB(255,120,40) })
 function Library:RegisterTheme(name, preset)
@@ -241,9 +249,14 @@ end
 function Window:_stroke(parent, thickness, transparency)
     local s = Make("UIStroke", {
         Parent = parent, ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-        Color = Color3.new(1, 1, 1), Thickness = thickness or 1, Transparency = transparency or 0.2,
+        Color = self.Flat and (self.Theme.Stroke or self.Theme.Accent) or Color3.new(1, 1, 1),
+        Thickness = thickness or 1, Transparency = self.Flat and 0.35 or (transparency or 0.2),
     })
-    self:_breathe(Make("UIGradient", { Parent = s, Rotation = 0 }))
+    if self.Flat then
+        self:_bind(function(t) s.Color = t.Stroke or t.Accent end)
+    else
+        self:_breathe(Make("UIGradient", { Parent = s, Rotation = 0 }))
+    end
     return s
 end
 
@@ -251,6 +264,16 @@ end
 -- Frames (no image asset needed). Reused in the sidebar logo, the watermark, and
 -- notification accents so the whole UI shares one recognizable mark.
 function Window:_cometMark(parent, size, anchor, position)
+    if self.Flat then
+        local d = math.max(6, math.floor((size or 14) * 0.5))
+        local dot = Make("Frame", {
+            Parent = parent, Size = UDim2.fromOffset(d, d), BorderSizePixel = 0,
+            BackgroundColor3 = self.Theme.Accent, AnchorPoint = anchor, Position = position,
+        })
+        Round(dot)
+        self:_bind(function(t) dot.BackgroundColor3 = t.Accent end)
+        return dot
+    end
     size = size or 14
     local holder = Make("Frame", { Parent = parent, Size = UDim2.fromOffset(size * 2.6, size), BackgroundTransparency = 1, AnchorPoint = anchor, Position = position })
     local tail = Make("Frame", {
@@ -293,7 +316,9 @@ function Window:_fx(btn, o)
     local base = btn.BackgroundTransparency
     btn.MouseEnter:Connect(function()
         self:_play("Hover")
-        Tween(scale, { Scale = o.Grow or 1.04 }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        if not self.Flat then
+            Tween(scale, { Scale = o.Grow or 1.04 }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        end
         if not o.NoFade then Tween(btn, { BackgroundTransparency = math.max(base - 0.2, 0) }, 0.2) end
     end)
     btn.MouseLeave:Connect(function()
@@ -377,6 +402,8 @@ function Library:CreateWindow(opts)
     self._onUnload    = {}
     self._quick       = {}
     self._sounds      = {}
+    self._keybinds    = {}
+    self._kbWatch     = {}
     self.Rainbow      = false
     self.Visible      = false
     self.ToggleKey    = opts.ToggleKey or Enum.KeyCode.RightShift
@@ -393,6 +420,7 @@ function Library:CreateWindow(opts)
         preset = Library.Themes[self.ThemeName]
     end
     self.Theme = BuildTheme(preset)
+    self.Flat = opts.Flat == true
 
     -- Replace an existing instance of the same window
     local guiName = "ScorpUI_" .. self.Title:gsub("[^%w_]", "")
@@ -426,14 +454,16 @@ function Library:CreateWindow(opts)
         BackgroundTransparency = 0.05, ClipsDescendants = true, Active = true, Visible = false,
     })
     self._mainScale = Make("UIScale", { Parent = self.Main, Scale = 0 })
-    Corner(self.Main, 14)
-    Make("UIGradient", { Parent = self.Main, Rotation = -45, Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 255, 255)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(205, 215, 255)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(255, 238, 255)),
-    }) })
-    self.mainStroke = Make("UIStroke", { Parent = self.Main, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 2, Transparency = 0.15 })
-    self:_bind(function(t) self.Main.BackgroundColor3 = t.MainBg; self.mainStroke.Color = t.Accent end)
+    Corner(self.Main, self.Flat and 10 or 14)
+    if not self.Flat then
+        Make("UIGradient", { Parent = self.Main, Rotation = -45, Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(205, 215, 255)),
+            ColorSequenceKeypoint.new(1,   Color3.fromRGB(255, 238, 255)),
+        }) })
+    end
+    self.mainStroke = Make("UIStroke", { Parent = self.Main, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = self.Flat and 1 or 2, Transparency = 0.15 })
+    self:_bind(function(t) self.Main.BackgroundColor3 = t.MainBg; self.mainStroke.Color = t.Stroke or t.Accent end)
 
     -- ── Cosmic backdrop: nebula glow, twinkling stars, shooting stars ──
     if opts.Starfield ~= false then
@@ -552,12 +582,16 @@ function Library:CreateWindow(opts)
     -- ── Sidebar ──
     self.Sidebar = Make("Frame", { Parent = self.Main, Size = UDim2.new(0, 190, 1, 0), BackgroundTransparency = 0.2, BorderSizePixel = 0 })
     self:_bind(function(t) self.Sidebar.BackgroundColor3 = t.SidebarBg end)
-    Make("UIGradient", { Parent = self.Sidebar, Rotation = 90, Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(175, 185, 225)) }) })
+    if not self.Flat then
+        Make("UIGradient", { Parent = self.Sidebar, Rotation = 90, Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(175, 185, 225)) }) })
+    end
     local edge = Make("Frame", { Parent = self.Sidebar, Size = UDim2.new(0, 1, 1, 0), Position = UDim2.new(1, -1, 0, 0), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
-    Make("UIGradient", { Parent = edge, Rotation = 90, Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.3, 0.55), NumberSequenceKeypoint.new(0.7, 0.55), NumberSequenceKeypoint.new(1, 1) }) })
-    self:_bind(function(t) edge.BackgroundColor3 = t.Accent end)
+    if not self.Flat then
+        Make("UIGradient", { Parent = edge, Rotation = 90, Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.3, 0.55), NumberSequenceKeypoint.new(0.7, 0.55), NumberSequenceKeypoint.new(1, 1) }) })
+    end
+    self:_bind(function(t) edge.BackgroundColor3 = self.Flat and (t.Stroke or t.Accent) or t.Accent end)
 
     -- Subtitle gets its own generous, word-wrapped block instead of a single clipped line.
     local subtitleBlockHeight = 0
@@ -573,9 +607,14 @@ function Library:CreateWindow(opts)
         TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBlack, TextSize = 28,
         TextTruncate = Enum.TextTruncate.AtEnd,
     })
-    self:_breathe(Make("UIGradient", { Parent = logo, Rotation = 0 }))
-    local logoGlow = Make("UIStroke", { Parent = logo, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual, Thickness = 1.5, Transparency = 0.72 })
-    self:_bind(function(t) logoGlow.Color = t.AccentLight end)
+    if self.Flat then
+        logo.TextColor3 = self.Theme.TextWhite
+        self:_bind(function(t) logo.TextColor3 = t.TextWhite end)
+    else
+        self:_breathe(Make("UIGradient", { Parent = logo, Rotation = 0 }))
+        local logoGlow = Make("UIStroke", { Parent = logo, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual, Thickness = 1.5, Transparency = 0.72 })
+        self:_bind(function(t) logoGlow.Color = t.AccentLight end)
+    end
     if opts.Subtitle then
         Make("TextLabel", {
             Parent = logoArea, Size = UDim2.new(1, -20, 0, subtitleBlockHeight), Position = UDim2.new(0, 10, 0, markRow + 40),
@@ -584,14 +623,18 @@ function Library:CreateWindow(opts)
             TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Top,
         })
     end
-    local logoLine = Make("Frame", { Parent = logoArea, Size = UDim2.new(1, -40, 0, 2), Position = UDim2.new(0, 20, 1, -2), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
-    local divGrad = Make("UIGradient", { Parent = logoLine, Rotation = 0, Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 0.7) }) })
-    self:_breathe(divGrad)
-    local diamondGlow = Make("Frame", { Parent = logoArea, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 1, -1), Size = UDim2.fromOffset(16, 16), Rotation = 45, BackgroundTransparency = 0.82, BorderSizePixel = 0 })
-    Corner(diamondGlow, 3)
-    Make("Frame", { Parent = logoArea, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 1, -1), Size = UDim2.fromOffset(7, 7), Rotation = 45, BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
-    self:_bind(function(t) diamondGlow.BackgroundColor3 = t.AccentLight end)
+    local logoLine = Make("Frame", { Parent = logoArea, Size = UDim2.new(1, -40, 0, self.Flat and 1 or 2), Position = UDim2.new(0, 20, 1, -2), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
+    if self.Flat then
+        self:_bind(function(t) logoLine.BackgroundColor3 = t.Stroke or t.Accent end)
+    else
+        local divGrad = Make("UIGradient", { Parent = logoLine, Rotation = 0, Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 0.7) }) })
+        self:_breathe(divGrad)
+        local diamondGlow = Make("Frame", { Parent = logoArea, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 1, -1), Size = UDim2.fromOffset(16, 16), Rotation = 45, BackgroundTransparency = 0.82, BorderSizePixel = 0 })
+        Corner(diamondGlow, 3)
+        Make("Frame", { Parent = logoArea, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 1, -1), Size = UDim2.fromOffset(7, 7), Rotation = 45, BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
+        self:_bind(function(t) diamondGlow.BackgroundColor3 = t.AccentLight end)
+    end
 
     local searchY = logoArea.Size.Y.Offset + 10
     local searchBg = Make("Frame", { Parent = self.Sidebar, Size = UDim2.new(1, -20, 0, 30), Position = UDim2.new(0, 10, 0, searchY), BackgroundTransparency = 0.5, ClipsDescendants = false })
@@ -651,9 +694,13 @@ function Library:CreateWindow(opts)
     Make("UIPadding", { Parent = self._tabList, PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 15) })
 
     self._footer = Make("Frame", { Parent = self.Sidebar, Size = UDim2.new(1, 0, 0, 0), Position = UDim2.new(0, 0, 1, 0), BackgroundTransparency = 1, Visible = false })
-    local footLine = Make("Frame", { Parent = self._footer, Size = UDim2.new(1, -40, 0, 2), Position = UDim2.new(0, 20, 0, 0), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
-    self:_breathe(Make("UIGradient", { Parent = footLine, Rotation = 0, Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.8), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 0.8) }) }))
+    local footLine = Make("Frame", { Parent = self._footer, Size = UDim2.new(1, -40, 0, self.Flat and 1 or 2), Position = UDim2.new(0, 20, 0, 0), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
+    if self.Flat then
+        self:_bind(function(t) footLine.BackgroundColor3 = t.Stroke or t.Accent end)
+    else
+        self:_breathe(Make("UIGradient", { Parent = footLine, Rotation = 0, Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.8), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 0.8) }) }))
+    end
     Make("TextLabel", {
         Parent = self._footer, Size = UDim2.new(1, -40, 0, 18), Position = UDim2.new(0, 20, 0, 8), BackgroundTransparency = 1,
         Text = "QUICK ACTIONS", TextColor3 = self.Theme.TextDim, Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
@@ -739,7 +786,7 @@ function Library:CreateWindow(opts)
     -- ── Global keys ──
     self:_connect(UserInputService.InputBegan, function(input, gp)
         if gp or self._binding then return end
-        if input.KeyCode == self.ToggleKey then
+        if self.ToggleKey and input.KeyCode == self.ToggleKey then
             self:Toggle()
         elseif self.UnloadKey and input.KeyCode == self.UnloadKey then
             self:Destroy()
@@ -760,8 +807,9 @@ end
 --  Window public API
 -- ───────────────────────────────────────────────────────────────────────────
 function Window:_updateHint()
-    local txt = "[" .. self.ToggleKey.Name .. "] Toggle"
-    if self.UnloadKey then txt = txt .. "  |  [" .. self.UnloadKey.Name .. "] Unload" end
+    local toggleName = (self.ToggleKey and self.ToggleKey.Name) or "None"
+    local txt = "[" .. toggleName .. "] Toggle"
+    if self.UnloadKey and self.UnloadKey.Name then txt = txt .. "  |  [" .. self.UnloadKey.Name .. "] Unload" end
     self._hint.Text = txt
 end
 
@@ -854,14 +902,18 @@ function Window:Notify(title, desc, duration, color)
     local wrapper = Make("Frame", { Parent = self._notifs, Size = UDim2.new(1, 0, 0, 65), BackgroundTransparency = 1 })
     local notif = Make("Frame", {
         Parent = wrapper, Size = UDim2.new(1, 0, 1, 0), Position = UDim2.new(1, 50, 0, 0),
-        BackgroundColor3 = Color3.fromRGB(14, 18, 36), BackgroundTransparency = 0.2,
+        BackgroundColor3 = self.Flat and self.Theme.MainBg or Color3.fromRGB(14, 18, 36), BackgroundTransparency = 0.2,
     })
     local notifScale = Make("UIScale", { Parent = notif, Scale = 0.85 })
-    Corner(notif, 10)
-    local stroke = Make("UIStroke", { Parent = notif, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Color = c, Thickness = 2, Transparency = 0.2 })
-    if not color then self:_breathe(Make("UIGradient", { Parent = stroke, Rotation = 0 })) end
+    Corner(notif, self.Flat and 8 or 10)
+    local stroke = Make("UIStroke", { Parent = notif, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Color = self.Flat and (self.Theme.Stroke or c) or c, Thickness = self.Flat and 1 or 2, Transparency = 0.2 })
+    if self.Flat then
+        self:_bind(function(t) notif.BackgroundColor3 = t.MainBg; if not color then stroke.Color = t.Stroke or t.Accent end end)
+    elseif not color then
+        self:_breathe(Make("UIGradient", { Parent = stroke, Rotation = 0 }))
+    end
 
-    if color then
+    if color or self.Flat then
         -- Explicit color (e.g. success/danger) keeps a plain accent bar so the color reads instantly.
         local bar = Make("Frame", { Parent = notif, Size = UDim2.new(0, 4, 1, -20), Position = UDim2.new(0, 10, 0, 10), BackgroundColor3 = c, BorderSizePixel = 0 })
         Round(bar)
@@ -1043,12 +1095,12 @@ end
 function Window:SelectTab(tab)
     for _, t in ipairs(self._tabs) do
         if t == tab then
-            Tween(t._fg, { TextColor3 = self.Theme.TextWhite }, 0.2)
-            Tween(t._txtStroke, { Transparency = 0.3 }, 0.2)
-            t._indicator.Visible = true
+            Tween(t._fg, { TextColor3 = self.Flat and Color3.new(1, 1, 1) or self.Theme.TextWhite }, 0.2)
+            Tween(t._txtStroke, { Transparency = self.Flat and 1 or 0.3 }, 0.2)
+            t._indicator.Visible = not self.Flat
             t._pill.Visible = true
-            t._pill.BackgroundTransparency = 1
-            Tween(t._pill, { BackgroundTransparency = 0.86 }, 0.3)
+            t._pill.BackgroundTransparency = self.Flat and 0 or 1
+            Tween(t._pill, { BackgroundTransparency = self.Flat and 0 or 0.86 }, 0.3)
             t.Page.Visible = true
             t._pageScale.Scale = 0.96
             Tween(t._pageScale, { Scale = 1 }, 0.4, Enum.EasingStyle.Quint)
@@ -1080,8 +1132,8 @@ function Window:CreateTab(name, opts)
         Parent = btn, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = label, TextColor3 = Color3.new(1, 1, 1),
         Font = Enum.Font.Montserrat, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 1,
     })
-    local txtStroke = Make("UIStroke", { Parent = bgText, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual, Color = Color3.new(1, 1, 1), Thickness = 1, Transparency = 0.75 })
-    self:_breathe(Make("UIGradient", { Parent = txtStroke, Rotation = 0 }))
+    local txtStroke = Make("UIStroke", { Parent = bgText, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual, Color = Color3.new(1, 1, 1), Thickness = 1, Transparency = self.Flat and 1 or 0.75 })
+    if not self.Flat then self:_breathe(Make("UIGradient", { Parent = txtStroke, Rotation = 0 })) end
     local fgText = Make("TextLabel", {
         Parent = btn, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = label, TextColor3 = self.Theme.TextDim,
         Font = Enum.Font.Montserrat, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 2,
@@ -1106,27 +1158,35 @@ function Window:CreateTab(name, opts)
 
     btn.MouseEnter:Connect(function()
         self:_play("Hover")
-        if not indicator.Visible then
+        local active = (self.Flat and self.CurrentTab == tab) or indicator.Visible
+        if not active then
             Tween(fgText, { TextColor3 = self.Theme.TextWhite }, 0.15)
-            Tween(txtStroke, { Transparency = 0.45 }, 0.15)
+            if not self.Flat then Tween(txtStroke, { Transparency = 0.45 }, 0.15) end
         end
-        Tween(btnScale, { Scale = 1.05 }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-        Tween(bgText, { Position = UDim2.new(0, 8, 0, 0) }, 0.25, Enum.EasingStyle.Quint)
-        Tween(fgText, { Position = UDim2.new(0, 8, 0, 0) }, 0.25, Enum.EasingStyle.Quint)
+        if not self.Flat then
+            Tween(btnScale, { Scale = 1.05 }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+            Tween(bgText, { Position = UDim2.new(0, 8, 0, 0) }, 0.25, Enum.EasingStyle.Quint)
+            Tween(fgText, { Position = UDim2.new(0, 8, 0, 0) }, 0.25, Enum.EasingStyle.Quint)
+        end
     end)
     btn.MouseLeave:Connect(function()
-        if not indicator.Visible then
+        local active = (self.Flat and self.CurrentTab == tab) or indicator.Visible
+        if not active then
             Tween(fgText, { TextColor3 = self.Theme.TextDim }, 0.15)
-            Tween(txtStroke, { Transparency = 0.75 }, 0.15)
+            if not self.Flat then Tween(txtStroke, { Transparency = 0.75 }, 0.15) end
         end
-        Tween(btnScale, { Scale = 1 }, 0.2)
-        Tween(bgText, { Position = UDim2.new() }, 0.25, Enum.EasingStyle.Quint)
-        Tween(fgText, { Position = UDim2.new() }, 0.25, Enum.EasingStyle.Quint)
+        if not self.Flat then
+            Tween(btnScale, { Scale = 1 }, 0.2)
+            Tween(bgText, { Position = UDim2.new() }, 0.25, Enum.EasingStyle.Quint)
+            Tween(fgText, { Position = UDim2.new() }, 0.25, Enum.EasingStyle.Quint)
+        end
     end)
     btn.MouseButton1Click:Connect(function()
         self:_play("Click")
-        Tween(btnScale, { Scale = 0.95 }, 0.1)
-        task.delay(0.1, function() Tween(btnScale, { Scale = 1 }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out) end)
+        if not self.Flat then
+            Tween(btnScale, { Scale = 0.95 }, 0.1)
+            task.delay(0.1, function() Tween(btnScale, { Scale = 1 }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out) end)
+        end
         self:SelectTab(tab)
     end)
 
@@ -1147,11 +1207,14 @@ function Tab:CreateSection(title, expanded)
     win:_bind(function(t) header.BackgroundColor3 = t.ToggleOff end)
     Corner(header, 6)
     win:_stroke(header, 1, 0.5)
-    Make("UIGradient", { Parent = header, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.6) }) })
-    win:_cometMark(header, 9, Vector2.new(0, 0.5), UDim2.new(0, 8, 0.5, 0))
+    if not win.Flat then
+        Make("UIGradient", { Parent = header, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.6) }) })
+        win:_cometMark(header, 9, Vector2.new(0, 0.5), UDim2.new(0, 8, 0.5, 0))
+    end
     Make("TextLabel", {
-        Parent = header, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, 28, 0, 0), BackgroundTransparency = 1,
-        Text = title, TextColor3 = win.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = header, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, win.Flat and 12 or 28, 0, 0), BackgroundTransparency = 1,
+        Text = win.Flat and string.upper(title) or title, TextColor3 = win.Flat and win.Theme.TextDim or win.Theme.TextWhite,
+        Font = Enum.Font.GothamBold, TextSize = win.Flat and 11 or 13, TextXAlignment = Enum.TextXAlignment.Left,
     })
     -- Arrow rotates (tweened) instead of swapping glyphs, so it stays in line with the tween-only rule.
     local arrow = Make("TextLabel", {
@@ -1244,11 +1307,15 @@ function Section:AddButton(name, callback)
     })
     win:_bind(function(t) btn.BackgroundColor3 = t.ToggleOff end)
     Corner(btn, 8)
-    Make("UIGradient", { Parent = btn, Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(190, 200, 235)) })
+    if not win.Flat then
+        Make("UIGradient", { Parent = btn, Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(190, 200, 235)) })
+    end
     win:_stroke(btn, 1, 0.2)
     local scale = win:_fx(btn, { Grow = 1.04 })
-    btn.MouseButton1Down:Connect(function() Tween(scale, { Scale = 0.94 }, 0.1) end)
-    btn.MouseButton1Up:Connect(function() Tween(scale, { Scale = 1.04 }, 0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out) end)
+    if not win.Flat then
+        btn.MouseButton1Down:Connect(function() Tween(scale, { Scale = 0.94 }, 0.1) end)
+        btn.MouseButton1Up:Connect(function() Tween(scale, { Scale = 1.04 }, 0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out) end)
+    end
     btn.MouseButton1Click:Connect(function()
         win:_play("Click")
         Tween(btn, { BackgroundColor3 = win.Theme.Accent, BackgroundTransparency = 0 }, 0.1)
@@ -1281,6 +1348,7 @@ local function BindButton(win, parent, pos, size, default, onChange)
         key = k
         btn.Text = k and ("[ " .. k.Name .. " ]") or "[ None ]"
         if not silent then Fire(onChange, k) end
+        win:_noteKeybinds()
     end
     btn.MouseButton1Click:Connect(function()
         win:_play("Click")
@@ -1358,11 +1426,16 @@ function Section:AddToggle(name, o)
 
     if bindable then
         local bind = BindButton(win, row, UDim2.new(1, -112, 0.5, -10), UDim2.fromOffset(60, 20), o.Keybind, function(k)
-            if o.Flag then win.Flags[o.Flag .. "_Key"] = k end
+            if o.Flag then win.Flags[o.Flag .. "_Key"] = k or false end
         end)
+        win:TrackKeybind({
+            Name = name,
+            Get = function() return bind.Get() end,
+            Set = function(k) bind.Set(k) end,
+        })
         if o.Flag then
-            win.Flags[o.Flag .. "_Key"] = o.Keybind
-            win._setters[o.Flag .. "_Key"] = function(k) bind.Set(k, true); win.Flags[o.Flag .. "_Key"] = k end
+            win.Flags[o.Flag .. "_Key"] = o.Keybind or false
+            win._setters[o.Flag .. "_Key"] = function(k) bind.Set(k, true); win.Flags[o.Flag .. "_Key"] = k or false end
         end
         win:_connect(UserInputService.InputBegan, function(input, gp)
             local k = bind.Get()
@@ -1403,9 +1476,14 @@ function Section:AddSlider(name, o)
     win:_stroke(track, 1, 0.2)
     local fill = Make("Frame", { Parent = track, Size = UDim2.new(0, 0, 1, 0), BorderSizePixel = 0 })
     Round(fill)
-    fill.BackgroundColor3 = Color3.new(1, 1, 1)
-    local fillGrad = Make("UIGradient", { Parent = fill })
-    win:_bind(function(t) fillGrad.Color = ColorSequence.new(t.Accent, t.AccentLight) end)
+    if win.Flat then
+        fill.BackgroundColor3 = win.Theme.Accent
+        win:_bind(function(t) fill.BackgroundColor3 = t.Accent end)
+    else
+        fill.BackgroundColor3 = Color3.new(1, 1, 1)
+        local fillGrad = Make("UIGradient", { Parent = fill })
+        win:_bind(function(t) fillGrad.Color = ColorSequence.new(t.Accent, t.AccentLight) end)
+    end
     local knob = Make("Frame", { Parent = track, Size = UDim2.fromOffset(12, 12), BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.new(0, -6, 0.5, -6) })
     Round(knob)
     -- Glow ring that brightens while actively dragging, echoing the toggle's on-glow.
@@ -1585,11 +1663,11 @@ function Section:AddKeybind(name, o)
     RowLabel(win, row, name, -100)
     local bind
     bind = BindButton(win, row, UDim2.new(1, -80, 0.5, -12), UDim2.fromOffset(80, 24), o.Default, function(k)
-        if o.Flag then win.Flags[o.Flag] = k end
+        if o.Flag then win.Flags[o.Flag] = k or false end
         Fire(o.OnChange, k)
     end)
     local obj = { Frame = row }
-    function obj:Set(k, silent) bind.Set(k, silent); if o.Flag then win.Flags[o.Flag] = k end end
+    function obj:Set(k, silent) bind.Set(k, silent); if o.Flag then win.Flags[o.Flag] = k or false end end
     function obj:Get() return bind.Get() end
     win:_connect(UserInputService.InputBegan, function(input, gp)
         local k = bind.Get()
@@ -1597,9 +1675,14 @@ function Section:AddKeybind(name, o)
         Fire(o.Callback, k)
     end)
     if o.Flag then
-        win.Flags[o.Flag] = o.Default
+        win.Flags[o.Flag] = o.Default or false
         win._setters[o.Flag] = function(k) obj:Set(k, true) end
     end
+    win:TrackKeybind({
+        Name = name,
+        Get = function() return bind.Get() end,
+        Set = function(k) obj:Set(k) end,
+    })
     return obj
 end
 
@@ -1715,5 +1798,277 @@ function Section:AddColorPicker(name, o)
     return obj
 end
 
+
+function Window:TrackKeybind(entry)
+    self._keybinds[#self._keybinds + 1] = entry
+    self:_noteKeybinds()
+    return entry
+end
+
+function Window:OnKeybindsChanged(fn)
+    self._kbWatch[#self._kbWatch + 1] = fn
+end
+
+function Window:_noteKeybinds()
+    if self._kbQueued then return end
+    self._kbQueued = true
+    task.defer(function()
+        self._kbQueued = false
+        if self.Destroyed then return end
+        local watch = self._kbWatch
+        for i = 1, #watch do
+            pcall(watch[i])
+        end
+    end)
+end
+
+function Section:AddBindRow(entry)
+    local win = self.Window
+    local row = Row(self, 32)
+    RowLabel(win, row, entry.Name, -150)
+    local keyLbl = Make("TextLabel", {
+        Parent = row, Size = UDim2.fromOffset(72, 20), Position = UDim2.new(1, -108, 0.5, -10),
+        BackgroundTransparency = 1, Font = Enum.Font.Code, TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Right,
+    })
+    win:_bind(function(t) keyLbl.TextColor3 = t.TextDim end)
+    local key = entry.Get()
+    keyLbl.Text = (key and key.Name) and ("[ " .. key.Name .. " ]") or "[ None ]"
+    local clear = Make("TextButton", {
+        Parent = row, Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -28, 0.5, -12),
+        BackgroundTransparency = 0.3, Text = "✕", TextColor3 = win.Theme.TextWhite,
+        Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false,
+    })
+    win:_bind(function(t) clear.BackgroundColor3 = t.ToggleOff end)
+    Corner(clear, 6)
+    win:_fx(clear, { Grow = 1.08 })
+    clear.MouseButton1Click:Connect(function()
+        win:_play("Click")
+        entry.Set(nil)
+    end)
+    return { Frame = row }
+end
+
+function Window:MountKeybindTab(tab)
+    local sec = tab:CreateSection("Assigned keys", true)
+    sec:AddLabel("Press X to clear a key completely. The control stays; only that key is removed.", { Wrap = true, Color = self.Theme.TextDim })
+    local empty = sec:AddLabel("No keys assigned yet.", { Color = self.Theme.TextDim })
+    local rows = {}
+    local function rebuild()
+        for i = 1, #rows do
+            if rows[i].Frame then rows[i].Frame:Destroy() end
+        end
+        rows = {}
+        local n = 0
+        local list = self._keybinds
+        for i = 1, #list do
+            local entry = list[i]
+            local key = entry.Get()
+            if key and key.Name then
+                n = n + 1
+                rows[n] = sec:AddBindRow(entry)
+            end
+        end
+        empty.Frame.Visible = n == 0
+        empty.Frame.Size = UDim2.new(1, 0, 0, n == 0 and 20 or 0)
+    end
+    self:OnKeybindsChanged(rebuild)
+    rebuild()
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Standalone popout panel — a second, independent window with its own drag
+--  and its own show/hide, that still accepts :CreateSection(...) exactly like
+--  a sidebar Tab does. Use this for anything that deserves its own window
+--  instead of being buried in the sidebar (e.g. the tag editor).
+-- ───────────────────────────────────────────────────────────────────────────
+function Window:CreatePopout(opts)
+    opts = opts or {}
+    local win = self
+    local size = opts.Size or UDim2.fromOffset(460, 560)
+
+    local frame = Make("Frame", {
+        Name = opts.Name or "Popout", Parent = self.Gui, Size = size,
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = opts.Position or UDim2.new(0.5, 0, 0.5, 0),
+        BackgroundTransparency = 0.05, ClipsDescendants = true, Active = true, Visible = false, ZIndex = 80,
+    })
+    win:_bind(function(t) frame.BackgroundColor3 = t.MainBg end)
+    local scale = Make("UIScale", { Parent = frame, Scale = 0 })
+    Corner(frame, 14)
+    win:_stroke(frame, 1, 0.35)
+
+    local head = Make("Frame", { Parent = frame, Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1, ZIndex = 81 })
+    Make("TextLabel", {
+        Parent = head, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, 16, 0, 0), BackgroundTransparency = 1,
+        Text = opts.Title or "Panel", TextColor3 = self.Theme.TextWhite, Font = Enum.Font.GothamBlack, TextSize = 15,
+        TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 81,
+    })
+    local closeBtn = Make("TextButton", {
+        Parent = head, Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -36, 0.5, -14), BackgroundTransparency = 0.3,
+        Text = "✕", TextColor3 = self.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false, ZIndex = 81,
+    })
+    win:_bind(function(t) closeBtn.BackgroundColor3 = t.ToggleOff end)
+    Corner(closeBtn, 8)
+    win:_fx(closeBtn, { Grow = 1.08 })
+    win:_drag(head, frame)
+
+    local page = Make("ScrollingFrame", {
+        Parent = frame, Size = UDim2.new(1, -12, 1, -50), Position = UDim2.new(0, 6, 0, 46), BackgroundTransparency = 1,
+        BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ZIndex = 80,
+    })
+    win:_bind(function(t) page.ScrollBarImageColor3 = t.Accent end)
+    Make("UIPadding", { Parent = page, PaddingTop = UDim.new(0, 6), PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 18), PaddingBottom = UDim.new(0, 20) })
+    Make("UIListLayout", { Parent = page, Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder })
+
+    -- Duck-types as a Tab (same .Window / .Page shape) so every existing Section:Add*
+    -- control works completely unmodified inside a popout.
+    local popout = setmetatable({ Window = win, Name = opts.Title or "Panel", Page = page }, Tab)
+    popout.Visible = false
+    popout.Frame = frame
+
+    local function setVisible(v)
+        v = v and true or false
+        if v == popout.Visible then return end
+        popout.Visible = v
+        if v then
+            win:_play("Click")
+            frame.Visible = true
+            Tween(scale, { Scale = 1 }, 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        else
+            Tween(scale, { Scale = 0 }, 0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+            task.delay(0.25, function() if not popout.Visible then frame.Visible = false end end)
+        end
+        if opts.OnToggle then Fire(opts.OnToggle, v) end
+    end
+    closeBtn.MouseButton1Click:Connect(function() win:_play("Click"); setVisible(false) end)
+
+    function popout:Show() setVisible(true) end
+    function popout:Hide() setVisible(false) end
+    function popout:Toggle() setVisible(not popout.Visible) end
+    return popout
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Persistent top info bar — player count (with a floating +1/-1 on join/leave),
+--  ping, fps, and a row of icon buttons. Lives outside Main, so it's visible
+--  whether the main panel is open or closed (mirrors the always-on bar Mois7-
+--  style hubs use). Icon actions are supplied by the caller via opts, so this
+--  stays generic — script.lua decides what the gear / nametag / discord icons do.
+-- ───────────────────────────────────────────────────────────────────────────
+function Window:CreateInfoBar(opts)
+    opts = opts or {}
+    local win = self
+    local ok, Stats = pcall(function() return game:GetService("Stats") end)
+    Stats = ok and Stats or nil
+
+    local bar = Make("Frame", {
+        Name = "InfoBar", Parent = self.Gui, Size = UDim2.fromOffset(0, 40), AutomaticSize = Enum.AutomaticSize.X,
+        AnchorPoint = Vector2.new(0.5, 0), Position = opts.Position or UDim2.new(0.5, 0, 0, 14),
+        BackgroundColor3 = Color3.fromRGB(10, 13, 24), BackgroundTransparency = 0.12, ZIndex = 70,
+    })
+    Round(bar)
+    win:_stroke(bar, 1, 0.3)
+
+    local row = Make("Frame", {
+        Parent = bar, Size = UDim2.fromOffset(0, 40), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, ZIndex = 71,
+    })
+    Make("UIPadding", { Parent = row, PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) })
+    Make("UIListLayout", {
+        Parent = row, FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 12),
+    })
+
+    local function stat(icon)
+        local holder = Make("Frame", { Parent = row, Size = UDim2.fromOffset(0, 40), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, ZIndex = 71 })
+        Make("UIListLayout", { Parent = holder, FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 4) })
+        Make("TextLabel", { Parent = holder, Size = UDim2.fromOffset(16, 40), BackgroundTransparency = 1, Text = icon, TextSize = 14, Font = Enum.Font.GothamBold, ZIndex = 71 })
+        local val = Make("TextLabel", {
+            Parent = holder, Size = UDim2.fromOffset(0, 40), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, Text = "…",
+            TextColor3 = win.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 71,
+        })
+        return holder, val
+    end
+
+    -- Player count, with a floating +1 / -1 badge whenever someone joins or leaves.
+    local countHolder, countLabel = stat("👥")
+    local function bump(delta)
+        local color = delta > 0 and win.Theme.Success or win.Theme.Danger
+        local badge = Make("TextLabel", {
+            Parent = countHolder, Size = UDim2.fromOffset(30, 16), Position = UDim2.new(0, 20, 0, 2),
+            BackgroundTransparency = 1, TextTransparency = 0, Text = (delta > 0 and "+1" or "-1"), TextColor3 = color,
+            Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 72,
+        })
+        Tween(badge, { Position = UDim2.new(0, 20, 0, -14), TextTransparency = 1 }, 0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            .Completed:Connect(function() badge:Destroy() end)
+    end
+    local function refreshCount() countLabel.Text = tostring(#Players:GetPlayers()) end
+    refreshCount()
+    win:_connect(Players.PlayerAdded, function() refreshCount(); bump(1) end)
+    win:_connect(Players.PlayerRemoving, function()
+        bump(-1)
+        task.defer(refreshCount) -- the leaving player is still in :GetPlayers() during PlayerRemoving itself
+    end)
+
+    -- Ping + FPS
+    local _, pingLabel = stat("📶")
+    local _, fpsLabel = stat("⚡")
+    do
+        local frames, acc = 0, 0
+        win:_connect(RunService.RenderStepped, function(dt)
+            frames, acc = frames + 1, acc + dt
+            if acc >= 0.5 then
+                fpsLabel.Text = tostring(math.floor(frames / acc + 0.5))
+                frames, acc = 0, 0
+            end
+        end)
+        task.spawn(function()
+            while bar.Parent do
+                local pingOk, ping = false, nil
+                if Stats then
+                    pingOk, ping = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+                end
+                pingLabel.Text = (pingOk and ping and (tostring(math.floor(ping)) .. "ms")) or "—"
+                task.wait(1)
+            end
+        end)
+    end
+
+    Make("Frame", { Parent = row, Size = UDim2.new(0, 1, 0, 20), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.85, ZIndex = 71 })
+
+    local function iconBtn(icon, onClick)
+        local b = Make("TextButton", {
+            Parent = row, Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 0.4, Text = icon,
+            TextSize = 13, Font = Enum.Font.GothamBold, AutoButtonColor = false, ZIndex = 71,
+        })
+        win:_bind(function(t) b.BackgroundColor3 = t.ToggleOff end)
+        Corner(b, 8)
+        win:_fx(b, { Grow = 1.1 })
+        b.MouseButton1Click:Connect(function() win:_play("Click"); Fire(onClick) end)
+        return b
+    end
+
+    iconBtn("⚙️", opts.OnSettings or function() win:Toggle(true) end)
+    if opts.OnGlobe then iconBtn("🌐", opts.OnGlobe) end
+    if opts.OnDiscord then iconBtn("💬", opts.OnDiscord) end
+
+    -- Nametag button: a small circular badge (initials) at the end of the bar, echoing the
+    -- "click your own avatar to edit your tag" pattern instead of a plain square icon.
+    if opts.OnNametag then
+        Make("Frame", { Parent = row, Size = UDim2.new(0, 1, 0, 20), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.85, ZIndex = 71 })
+        local badge = Make("TextButton", {
+            Parent = row, Size = UDim2.fromOffset(28, 28), Text = opts.NametagInitials or "🏷", AutoButtonColor = false,
+            Font = Enum.Font.GothamBlack, TextSize = 12, TextColor3 = Color3.new(1, 1, 1), ZIndex = 71,
+        })
+        win:_bind(function(t) badge.BackgroundColor3 = t.Accent end)
+        Round(badge)
+        win:_fx(badge, { Grow = 1.1, NoFade = true })
+        badge.MouseButton1Click:Connect(function() win:_play("Click"); Fire(opts.OnNametag) end)
+    end
+
+    local api = { Frame = bar }
+    function api.Destroy() pcall(function() bar:Destroy() end) end
+    return api
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
 Library.Window, Library.Tab, Library.Section = Window, Tab, Section
 return Library
