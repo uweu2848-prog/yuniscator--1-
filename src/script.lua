@@ -125,52 +125,6 @@ local Player = Window:CreateTab("Player", { Icon = "🌠" })
 
 do
     local sec = Player:CreateSection("Movement", true)
-    sec:AddToggle("Movement Toggle 1", { Bindable = false, Flag = "move_1", Callback = stub("Movement Toggle 1") })
-    sec:AddToggle("Movement Toggle 2", { Bindable = false, Flag = "move_2", Callback = stub("Movement Toggle 2") })
-    sec:AddSlider("Value Slider 1", { Min = 0, Max = 100, Default = 16, Flag = "move_v1", Callback = stub("Value Slider 1") })
-    sec:AddSlider("Value Slider 2", { Min = 0, Max = 200, Default = 50, Flag = "move_v2", Callback = stub("Value Slider 2") })
-end
-
-do
-    local sec = Player:CreateSection("Character", false)
-    sec:AddToggle("Character Toggle", { Bindable = false, Flag = "char_1", Callback = stub("Character Toggle") })
-    sec:AddButton("Character Button", stub("Character Button"))
-    sec:AddKeybind("Character Keybind", { Default = Enum.KeyCode.F, Flag = "char_key", Callback = stub("Character Keybind") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Visuals
--- ───────────────────────────────────────────────────────────────────────────
-local Visuals = Window:CreateTab("Visuals", { Icon = "☄️" })
-
-do
-    local sec = Visuals:CreateSection("Glow", true)
-    sec:AddToggle("Enable Glow", { Bindable = false, Flag = "vis_glow", Callback = stub("Enable Glow") })
-    sec:AddColorPicker("Glow Color", {
-        Default = Color3.fromRGB(90, 210, 255), Flag = "vis_glow_color", Callback = stub("Glow Color"),
-    })
-    sec:AddSlider("Glow Strength", { Min = 0, Max = 100, Default = 40, Suffix = "%", Flag = "vis_glow_str", Callback = stub("Glow Strength") })
-end
-
-do
-    local sec = Visuals:CreateSection("Overlay", false)
-    sec:AddToggle("Overlay Toggle 1", { Bindable = false, Flag = "vis_o1", Callback = stub("Overlay Toggle 1") })
-    sec:AddToggle("Overlay Toggle 2", { Bindable = false, Flag = "vis_o2", Callback = stub("Overlay Toggle 2") })
-    sec:AddDropdown("Style:", { Options = { "Style 1", "Style 2", "Style 3" }, Default = "Style 1", Flag = "vis_style", Callback = stub("Style") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Misc
--- ───────────────────────────────────────────────────────────────────────────
-local Misc = Window:CreateTab("Misc", { Icon = "🌌" })
-
-local function note(title, text, bad)
-    Window:Notify(title, tostring(text or ""), 3, bad and Window.Theme.Danger or nil)
-end
-
-do
-    local sec = Misc:CreateSection("Movement", true)
-    sec:AddLabel("Click the key chip on a row to rebind it. Defaults: C speed, X fly, G gravity, F click TP, K menu.")
     sec:AddToggle("CFrame movement", {
         Keybind = Enum.KeyCode.C, Flag = "misc_cframe",
         Callback = function(on) Features.SetCFrame(on) end,
@@ -213,8 +167,38 @@ do
     })
 end
 
+-- ───────────────────────────────────────────────────────────────────────────
+--  Visuals
+-- ───────────────────────────────────────────────────────────────────────────
+local Visuals = Window:CreateTab("Visuals", { Icon = "☄️" })
+
 do
-    local sec = Misc:CreateSection("World", false)
+    local sec = Visuals:CreateSection("Glow", true)
+    sec:AddToggle("Enable Glow", { Bindable = false, Flag = "vis_glow", Callback = stub("Enable Glow") })
+    sec:AddColorPicker("Glow Color", {
+        Default = Color3.fromRGB(90, 210, 255), Flag = "vis_glow_color", Callback = stub("Glow Color"),
+    })
+    sec:AddSlider("Glow Strength", { Min = 0, Max = 100, Default = 40, Suffix = "%", Flag = "vis_glow_str", Callback = stub("Glow Strength") })
+end
+
+do
+    local sec = Visuals:CreateSection("Overlay", false)
+    sec:AddToggle("Overlay Toggle 1", { Bindable = false, Flag = "vis_o1", Callback = stub("Overlay Toggle 1") })
+    sec:AddToggle("Overlay Toggle 2", { Bindable = false, Flag = "vis_o2", Callback = stub("Overlay Toggle 2") })
+    sec:AddDropdown("Style:", { Options = { "Style 1", "Style 2", "Style 3" }, Default = "Style 1", Flag = "vis_style", Callback = stub("Style") })
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Misc
+-- ───────────────────────────────────────────────────────────────────────────
+local Misc = Window:CreateTab("Misc", { Icon = "🌌" })
+
+local function note(title, text, bad)
+    Window:Notify(title, tostring(text or ""), 3, bad and Window.Theme.Danger or nil)
+end
+
+do
+    local sec = Misc:CreateSection("World", true)
     sec:AddToggle("Custom gravity", {
         Keybind = Enum.KeyCode.G, Flag = "misc_grav",
         Callback = function(on) Features.SetGravity(on) end,
