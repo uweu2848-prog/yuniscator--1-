@@ -227,16 +227,25 @@ Library.Themes = {
                           MainBg = Color3.fromRGB(8, 22, 30), SidebarBg = Color3.fromRGB(6, 16, 23), ToggleOff = Color3.fromRGB(18, 38, 48) },
     ["Deep Space"]    = { Accent = Color3.fromRGB(122, 132, 152), AccentLight = Color3.fromRGB(205, 214, 232),
                           MainBg = Color3.fromRGB(12, 13, 17), SidebarBg = Color3.fromRGB(8, 9, 12), ToggleOff = Color3.fromRGB(26, 28, 36) },
-    -- Flat shell: near-black surfaces, one blue accent, hairline outline.
+    -- Primary shell: near-black with silver chrome, high contrast, no cosmic fluff.
     ["Rayfield"] = {
-        Accent = Color3.fromRGB(80, 105, 255), AccentLight = Color3.fromRGB(140, 156, 255),
-        MainBg = Color3.fromRGB(15, 15, 19), SidebarBg = Color3.fromRGB(8, 8, 10),
-        ToggleOff = Color3.fromRGB(26, 26, 32), TextWhite = Color3.fromRGB(237, 237, 242),
-        TextDim = Color3.fromRGB(139, 139, 147), Danger = Color3.fromRGB(235, 76, 76),
-        Stroke = Color3.fromRGB(46, 46, 54),
+        Accent = Color3.fromRGB(188, 198, 214), AccentLight = Color3.fromRGB(232, 237, 248),
+        MainBg = Color3.fromRGB(7, 7, 9), SidebarBg = Color3.fromRGB(10, 10, 13),
+        ToggleOff = Color3.fromRGB(18, 18, 22), TextWhite = Color3.fromRGB(244, 244, 249),
+        TextDim = Color3.fromRGB(95, 100, 115), Danger = Color3.fromRGB(232, 60, 74),
+        Success = Color3.fromRGB(52, 208, 136),
+        Stroke = Color3.fromRGB(32, 34, 42),
+    },
+    -- Alternative: white accent (brighter, high-key chrome)
+    ["Chrome White"] = {
+        Accent = Color3.fromRGB(220, 224, 235), AccentLight = Color3.fromRGB(255, 255, 255),
+        MainBg = Color3.fromRGB(6, 6, 8), SidebarBg = Color3.fromRGB(9, 9, 11),
+        ToggleOff = Color3.fromRGB(16, 16, 20), TextWhite = Color3.fromRGB(248, 248, 252),
+        TextDim = Color3.fromRGB(88, 92, 108), Danger = Color3.fromRGB(230, 58, 72),
+        Stroke = Color3.fromRGB(28, 30, 38),
     },
 }
-Library.ThemeOrder = { "Rayfield", "Nova Silver", "Silver Surfer", "Power Cosmic", "Zenn-La", "Deep Space" }
+Library.ThemeOrder = { "Rayfield", "Chrome White", "Nova Silver", "Silver Surfer", "Power Cosmic", "Zenn-La", "Deep Space" }
 
 --- Add your own preset: Library:RegisterTheme("Sunset", { Accent = Color3.fromRGB(255,120,40) })
 function Library:RegisterTheme(name, preset)
@@ -751,31 +760,52 @@ function Library:CreateWindow(opts)
         local lines = math.ceil(#opts.Subtitle / 26) -- rough chars-per-line estimate at TextSize 10 / 150px width
         subtitleBlockHeight = math.max(28, lines * 13 + 6)
     end
-    local markRow = 20 -- room for the comet brand mark above the wordmark
-    local logoArea = Make("Frame", { Parent = self.Sidebar, Size = UDim2.new(1, 0, 0, markRow + 40 + subtitleBlockHeight + (opts.Subtitle and 10 or 6)), BackgroundTransparency = 1, Active = true })
-    self:_cometMark(logoArea, 12, Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 4))
-    local logo = Make("TextLabel", {
-        Parent = logoArea, Size = UDim2.new(1, 0, 0, 40), Position = UDim2.new(0, 0, 0, markRow), BackgroundTransparency = 1, Text = self.Title,
-        TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBlack, TextSize = 28,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    })
+    local logoTopPad = self.Flat and 0 or 20
+    local logoArea = Make("Frame", { Parent = self.Sidebar, Size = UDim2.new(1, 0, 0, logoTopPad + 44 + subtitleBlockHeight + (opts.Subtitle and 8 or 4)), BackgroundTransparency = 1, Active = true })
     if self.Flat then
-        logo.TextColor3 = self.Theme.TextWhite
+        -- Accent pip: 3px wide vertical bar left of the title (sharp, distinctive, no comet needed)
+        local pip = Make("Frame", { Parent = logoArea, Size = UDim2.fromOffset(3, 20), Position = UDim2.new(0, 16, 0, 14), BorderSizePixel = 0 })
+        Round(pip)
+        self:_bind(function(t) pip.BackgroundColor3 = t.Accent end)
+        local logo = Make("TextLabel", {
+            Parent = logoArea, Size = UDim2.new(1, -36, 0, 34), Position = UDim2.new(0, 26, 0, 8), BackgroundTransparency = 1, Text = self.Title,
+            TextColor3 = self.Theme.TextWhite, Font = Enum.Font.GothamBlack, TextSize = 20,
+            TextTruncate = Enum.TextTruncate.AtEnd, TextXAlignment = Enum.TextXAlignment.Left,
+        })
         self:_bind(function(t) logo.TextColor3 = t.TextWhite end)
+        if opts.Subtitle then
+            Make("TextLabel", {
+                Parent = logoArea, Size = UDim2.new(1, -32, 0, subtitleBlockHeight), Position = UDim2.new(0, 26, 0, 40),
+                BackgroundTransparency = 1, Text = opts.Subtitle, Font = Enum.Font.Gotham, TextSize = 10, TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+            })
+            self:_bind(function(t) logoArea:FindFirstChildOfClass("TextLabel"):FindFirstChildOfClass("TextLabel") end) -- noop, color set below
+            -- set subtitle color via bind
+            local stLbl = logoArea:FindFirstChildWhichIsA("TextLabel", true) -- wrong approach; do it directly
+            for _, c in ipairs(logoArea:GetChildren()) do
+                if c:IsA("TextLabel") and c.TextSize == 10 then self:_bind(function(t) c.TextColor3 = t.TextDim end) end
+            end
+        end
     else
+        self:_cometMark(logoArea, 12, Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 4))
+        local logo = Make("TextLabel", {
+            Parent = logoArea, Size = UDim2.new(1, 0, 0, 40), Position = UDim2.new(0, 0, 0, logoTopPad), BackgroundTransparency = 1, Text = self.Title,
+            TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBlack, TextSize = 28,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        })
         self:_breathe(Make("UIGradient", { Parent = logo, Rotation = 0 }))
         local logoGlow = Make("UIStroke", { Parent = logo, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual, Thickness = 1.5, Transparency = 0.72 })
         self:_bind(function(t) logoGlow.Color = t.AccentLight end)
+        if opts.Subtitle then
+            Make("TextLabel", {
+                Parent = logoArea, Size = UDim2.new(1, -20, 0, subtitleBlockHeight), Position = UDim2.new(0, 10, 0, logoTopPad + 40),
+                BackgroundTransparency = 1, Text = opts.Subtitle, TextColor3 = self.Theme.TextDim,
+                Font = Enum.Font.Gotham, TextSize = 10, TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Top,
+            })
+        end
     end
-    if opts.Subtitle then
-        Make("TextLabel", {
-            Parent = logoArea, Size = UDim2.new(1, -20, 0, subtitleBlockHeight), Position = UDim2.new(0, 10, 0, markRow + 40),
-            BackgroundTransparency = 1, Text = opts.Subtitle, TextColor3 = self.Theme.TextDim,
-            Font = Enum.Font.Gotham, TextSize = 10, TextWrapped = true,
-            TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Top,
-        })
-    end
-    local logoLine = Make("Frame", { Parent = logoArea, Size = UDim2.new(1, -40, 0, self.Flat and 1 or 2), Position = UDim2.new(0, 20, 1, -2), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
+    local logoLine = Make("Frame", { Parent = logoArea, Size = UDim2.new(1, self.Flat and -20 or -40, 0, 1), Position = UDim2.new(0, self.Flat and 10 or 20, 1, -1), BorderSizePixel = 0, BackgroundTransparency = self.Flat and 0.75 or 0 })
     if self.Flat then
         self:_bind(function(t) logoLine.BackgroundColor3 = t.Stroke or t.Accent end)
     else
@@ -1074,11 +1104,11 @@ function Window:Notify(title, desc, duration, color)
     end
     Make("TextLabel", {
         Parent = notif, Size = UDim2.new(1, -30, 0, 20), Position = UDim2.new(0, 25, 0, 10), BackgroundTransparency = 1,
-        Text = tostring(title or ""), TextColor3 = self.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+        Text = tostring(title or ""), TextColor3 = self.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
     })
     Make("TextLabel", {
-        Parent = notif, Size = UDim2.new(1, -30, 0, 30), Position = UDim2.new(0, 25, 0, 30), BackgroundTransparency = 1,
-        Text = tostring(desc or ""), TextColor3 = self.Theme.TextDim, Font = Enum.Font.Montserrat, TextSize = 12,
+        Parent = notif, Size = UDim2.new(1, -30, 0, 30), Position = UDim2.new(0, 25, 0, 28), BackgroundTransparency = 1,
+        Text = tostring(desc or ""), TextColor3 = self.Theme.TextDim, Font = Enum.Font.Gotham, TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true,
     })
 
@@ -1248,17 +1278,25 @@ function Window:SelectTab(tab)
         if t == tab then
             Tween(t._fg, { TextColor3 = self.Flat and Color3.new(1, 1, 1) or self.Theme.TextWhite }, 0.2)
             Tween(t._txtStroke, { Transparency = self.Flat and 1 or 0.3 }, 0.2)
-            t._indicator.Visible = not self.Flat
+            if self.Flat then
+                Tween(t._indicator, { BackgroundTransparency = 0 }, 0.18)
+            else
+                t._indicator.Visible = true
+            end
             t._pill.Visible = true
-            t._pill.BackgroundTransparency = self.Flat and 0 or 1
-            Tween(t._pill, { BackgroundTransparency = self.Flat and 0 or 0.86 }, 0.3)
+            t._pill.BackgroundTransparency = self.Flat and 0.88 or 1
+            Tween(t._pill, { BackgroundTransparency = self.Flat and 0.82 or 0.86 }, 0.3)
             t.Page.Visible = true
             t._pageScale.Scale = 0.96
             Tween(t._pageScale, { Scale = 1 }, 0.4, Enum.EasingStyle.Quint)
         else
             Tween(t._fg, { TextColor3 = self.Theme.TextDim }, 0.2)
             Tween(t._txtStroke, { Transparency = 0.75 }, 0.2)
-            t._indicator.Visible = false
+            if self.Flat then
+                Tween(t._indicator, { BackgroundTransparency = 1 }, 0.18)
+            else
+                t._indicator.Visible = false
+            end
             t._pill.Visible = false
             t.Page.Visible = false
         end
@@ -1274,25 +1312,32 @@ function Window:CreateTab(name, opts)
     local label = "      " .. (opts.Icon and (opts.Icon .. "  ") or "") .. name
     local isDefault = opts.Default or (#self._tabs == 0)
 
-    local btn = Make("TextButton", { Parent = self._tabList, Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, Text = "", AutoButtonColor = false })
-    local pill = Make("Frame", { Parent = btn, Size = UDim2.new(1, -20, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 0.86, BorderSizePixel = 0, Visible = false })
-    Corner(pill, 8)
-    self:_stroke(pill, 1, 0.55)
+    local btn = Make("TextButton", { Parent = self._tabList, Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, Text = "", AutoButtonColor = false })
+    local pill = Make("Frame", { Parent = btn, Size = UDim2.new(1, -16, 1, -4), Position = UDim2.new(0, 8, 0, 2), BackgroundTransparency = self.Flat and 0.88 or 0.86, BorderSizePixel = 0, Visible = false })
+    Corner(pill, self.Flat and 5 or 8)
+    if not self.Flat then self:_stroke(pill, 1, 0.55) end
     self:_bind(function(t) pill.BackgroundColor3 = t.Accent end)
     local bgText = Make("TextLabel", {
         Parent = btn, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = label, TextColor3 = Color3.new(1, 1, 1),
-        Font = Enum.Font.Montserrat, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 1,
+        Font = Enum.Font.GothamBold, TextSize = self.Flat and 13 or 14, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 1,
     })
     local txtStroke = Make("UIStroke", { Parent = bgText, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual, Color = Color3.new(1, 1, 1), Thickness = 1, Transparency = self.Flat and 1 or 0.75 })
     if not self.Flat then self:_breathe(Make("UIGradient", { Parent = txtStroke, Rotation = 0 })) end
     local fgText = Make("TextLabel", {
         Parent = btn, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = label, TextColor3 = self.Theme.TextDim,
-        Font = Enum.Font.Montserrat, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 2,
+        Font = Enum.Font.GothamBold, TextSize = self.Flat and 13 or 14, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 2,
     })
     local btnScale = Make("UIScale", { Parent = btn, Scale = 1 })
-    -- Active-tab marker is the same comet glyph used everywhere else, not a plain bar.
-    local indicator = self:_cometMark(btn, 8, Vector2.new(0, 0.5), UDim2.new(0, 6, 0.5, 0))
-    indicator.Visible = false
+    -- 2px left-bar indicator (flat mode) or comet mark (cosmic mode)
+    local indicator
+    if self.Flat then
+        indicator = Make("Frame", { Parent = btn, Size = UDim2.fromOffset(2, 16), Position = UDim2.new(0, 2, 0.5, -8), BorderSizePixel = 0, BackgroundTransparency = 1 })
+        Round(indicator)
+        self:_bind(function(t) indicator.BackgroundColor3 = t.Accent end)
+    else
+        indicator = self:_cometMark(btn, 8, Vector2.new(0, 0.5), UDim2.new(0, 6, 0.5, 0))
+        indicator.Visible = false
+    end
 
     local page = Make("ScrollingFrame", {
         Parent = self._pages, Size = UDim2.new(1, -12, 1, -6), Position = UDim2.new(0, 6, 0, 0), BackgroundTransparency = 1,
@@ -1354,19 +1399,25 @@ function Tab:CreateSection(title, expanded)
     local SH = 32
 
     local wrapper = Make("Frame", { Parent = self.Page, Size = UDim2.new(1, 0, 0, SH), BackgroundTransparency = 1, ClipsDescendants = true })
-    local header = Make("TextButton", { Parent = wrapper, Size = UDim2.new(1, 0, 0, SH), BackgroundTransparency = 0.3, Text = "", AutoButtonColor = false })
+    local header = Make("TextButton", { Parent = wrapper, Size = UDim2.new(1, 0, 0, SH), BackgroundTransparency = win.Flat and 0.62 or 0.3, Text = "", AutoButtonColor = false })
     win:_bind(function(t) header.BackgroundColor3 = t.ToggleOff end)
-    Corner(header, 6)
-    win:_stroke(header, 1, 0.5)
-    if not win.Flat then
+    Corner(header, win.Flat and 4 or 6)
+    if win.Flat then
+        local hStroke = Make("UIStroke", { Parent = header, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Transparency = 0.72 })
+        win:_bind(function(t) hStroke.Color = t.Stroke or t.Accent end)
+        local secBar = Make("Frame", { Parent = header, Size = UDim2.fromOffset(2, 14), Position = UDim2.new(0, 10, 0.5, -7), BorderSizePixel = 0 })
+        Round(secBar)
+        win:_bind(function(t) secBar.BackgroundColor3 = t.Accent end)
+    else
+        win:_stroke(header, 1, 0.5)
         Make("UIGradient", { Parent = header, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.6) }) })
         win:_cometMark(header, 9, Vector2.new(0, 0.5), UDim2.new(0, 8, 0.5, 0))
     end
-    Make("TextLabel", {
-        Parent = header, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, win.Flat and 12 or 28, 0, 0), BackgroundTransparency = 1,
-        Text = win.Flat and string.upper(title) or title, TextColor3 = win.Flat and win.Theme.TextDim or win.Theme.TextWhite,
-        Font = Enum.Font.GothamBold, TextSize = win.Flat and 11 or 13, TextXAlignment = Enum.TextXAlignment.Left,
+    local secLabel = Make("TextLabel", {
+        Parent = header, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, win.Flat and 20 or 28, 0, 0), BackgroundTransparency = 1,
+        Text = win.Flat and string.upper(title) or title, Font = Enum.Font.GothamBold, TextSize = win.Flat and 11 or 13, TextXAlignment = Enum.TextXAlignment.Left,
     })
+    win:_bind(function(t) secLabel.TextColor3 = win.Flat and t.TextDim or t.TextWhite end)
     -- Arrow rotates (tweened) instead of swapping glyphs, so it stays in line with the tween-only rule.
     local arrow = Make("TextLabel", {
         Parent = header, Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -25, 0, 0), BackgroundTransparency = 1,
@@ -1416,7 +1467,7 @@ end
 local function RowLabel(win, parent, text, widthOffset)
     return Make("TextLabel", {
         Parent = parent, Size = UDim2.new(1, widthOffset or -120, 1, 0), BackgroundTransparency = 1, Text = text,
-        TextColor3 = win.Theme.TextWhite, Font = Enum.Font.Montserrat, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+        TextColor3 = win.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
     })
 end
@@ -1453,15 +1504,18 @@ end
 function Section:AddButton(name, callback)
     local win = self.Window
     local btn = Make("TextButton", {
-        Parent = self.Content, Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 0.3, Text = name,
-        TextColor3 = win.Theme.TextWhite, Font = Enum.Font.Montserrat, TextSize = 13, AutoButtonColor = false,
+        Parent = self.Content, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = win.Flat and 0.72 or 0.3, Text = name,
+        TextColor3 = win.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 12, AutoButtonColor = false,
     })
     win:_bind(function(t) btn.BackgroundColor3 = t.ToggleOff end)
-    Corner(btn, 8)
-    if not win.Flat then
+    Corner(btn, win.Flat and 4 or 8)
+    if win.Flat then
+        local bStroke = Make("UIStroke", { Parent = btn, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Transparency = 0.58 })
+        win:_bind(function(t) bStroke.Color = t.Stroke or t.Accent end)
+    else
         Make("UIGradient", { Parent = btn, Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(190, 200, 235)) })
+        win:_stroke(btn, 1, 0.2)
     end
-    win:_stroke(btn, 1, 0.2)
     local scale = win:_fx(btn, { Grow = 1.04 })
     if not win.Flat then
         btn.MouseButton1Down:Connect(function() Tween(scale, { Scale = 0.94 }, 0.1) end)
@@ -3345,10 +3399,10 @@ local Window = Scorp:CreateWindow({
     Theme        = "Rayfield",
     Flat         = true,
     Starfield    = false,
+    Nebula       = false,
     ToggleKey    = Enum.KeyCode.K,
     UnloadKey    = Enum.KeyCode.Delete,
     WidgetText   = "SCORP",
-    LogoIcon     = "✦",
     ConfigFolder = "Scorp",
 })
 
