@@ -354,6 +354,19 @@ do
     end)
 end
 
+do
+    local sec = World:CreateSection("Voice", true)
+    sec:AddLabel("Click Anti VC, then unmute. It finishes once the mic is live.", { Wrap = true, Color = Window.Theme.TextDim })
+    sec:AddButton("Anti VC", function()
+        task.spawn(function()
+            local ok, msg = Features.RunAntiVC(function(status)
+                note("World", status)
+            end)
+            note("World", msg, not ok)
+        end)
+    end)
+end
+
 -- ───────────────────────────────────────────────────────────────────────────
 --  Staff
 -- ───────────────────────────────────────────────────────────────────────────

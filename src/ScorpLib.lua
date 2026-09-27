@@ -1347,9 +1347,12 @@ local function BindButton(win, parent, pos, size, default, onChange)
     local binding = false
     local api = {}
     function api.Get() return key end
-    function api.Set(k, silent)
+    function api.Apply(k)
         key = k
-        btn.Text = k and ("[ " .. k.Name .. " ]") or "[ None ]"
+        btn.Text = (k and k.Name) and ("[ " .. k.Name .. " ]") or "[ None ]"
+    end
+    function api.Set(k, silent)
+        api.Apply(k)
         if not silent then Fire(onChange, k) end
         win:_noteKeybinds()
     end
@@ -1828,15 +1831,10 @@ end
 function Section:AddBindRow(entry)
     local win = self.Window
     local row = Row(self, 32)
-    RowLabel(win, row, entry.Name, -150)
-    local keyLbl = Make("TextLabel", {
-        Parent = row, Size = UDim2.fromOffset(72, 20), Position = UDim2.new(1, -108, 0.5, -10),
-        BackgroundTransparency = 1, Font = Enum.Font.Code, TextSize = 11,
-        TextXAlignment = Enum.TextXAlignment.Right,
-    })
-    win:_bind(function(t) keyLbl.TextColor3 = t.TextDim end)
-    local key = entry.Get()
-    keyLbl.Text = (key and key.Name) and ("[ " .. key.Name .. " ]") or "[ None ]"
+    RowLabel(win, row, entry.Name, -160)
+    local bind = BindButton(win, row, UDim2.new(1, -116, 0.5, -10), UDim2.fromOffset(80, 20), entry.Get(), function(k)
+        entry.Set(k)
+    end)
     local clear = Make("TextButton", {
         Parent = row, Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -28, 0.5, -12),
         BackgroundTransparency = 0.3, Text = "✕", TextColor3 = win.Theme.TextWhite,
@@ -1849,34 +1847,41 @@ function Section:AddBindRow(entry)
         win:_play("Click")
         entry.Set(nil)
     end)
-    return { Frame = row }
+    return {
+        Frame = row,
+        Refresh = function()
+            local k = entry.Get()
+            if bind.Get() ~= k then bind.Apply(k) end
+        end,
+    }
 end
 
 function Window:MountKeybindTab(tab)
-    local sec = tab:CreateSection("Assigned keys", true)
-    sec:AddLabel("Press X to clear a key completely. The control stays; only that key is removed.", { Wrap = true, Color = self.Theme.TextDim })
-    local empty = sec:AddLabel("No keys assigned yet.", { Color = self.Theme.TextDim })
+    local sec = tab:CreateSection("Keybinds", true)
+    sec:AddLabel("Click a key to change it. X clears that key. The row stays.", { Wrap = true, Color = self.Theme.TextDim })
+    local empty = sec:AddLabel("No keybinds yet.", { Color = self.Theme.TextDim })
     local rows = {}
-    local function rebuild()
-        for i = 1, #rows do
-            if rows[i].Frame then rows[i].Frame:Destroy() end
-        end
-        rows = {}
-        local n = 0
+    local function sync()
         local list = self._keybinds
-        for i = 1, #list do
-            local entry = list[i]
-            local key = entry.Get()
-            if key and key.Name then
-                n = n + 1
-                rows[n] = sec:AddBindRow(entry)
+        if #rows ~= #list then
+            for i = 1, #rows do
+                if rows[i].Frame then rows[i].Frame:Destroy() end
+            end
+            rows = {}
+            for i = 1, #list do
+                rows[i] = sec:AddBindRow(list[i])
+            end
+        else
+            for i = 1, #rows do
+                rows[i].Refresh()
             end
         end
+        local n = #list
         empty.Frame.Visible = n == 0
         empty.Frame.Size = UDim2.new(1, 0, 0, n == 0 and 20 or 0)
     end
-    self:OnKeybindsChanged(rebuild)
-    rebuild()
+    self:OnKeybindsChanged(sync)
+    sync()
 end
 
 -- ───────────────────────────────────────────────────────────────────────────
