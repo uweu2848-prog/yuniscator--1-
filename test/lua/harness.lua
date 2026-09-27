@@ -293,15 +293,6 @@ local Section = setmetatable({}, { __index = function(_, k)
             return f
         end
     end
-    if k == "AddStatGrid" then
-        -- Real ScorpLib returns an array of setter closures (one per item), not a single
-        -- control object, so the generic "^Add" stub below doesn't fit this one's shape.
-        return function(_, items)
-            local setters = {}
-            for i = 1, #items do setters[i] = function() end end
-            return setters
-        end
-    end
     if k:match("^Add") then
         return function(_, name, opts)
             if type(opts) == "function" then opts = { Callback = opts } end
@@ -313,14 +304,8 @@ local Section = setmetatable({}, { __index = function(_, k)
             return obj
         end
     end
-    -- Anything else (e.g. a future Section method) is a harmless no-op, same policy as Window.
-    return function(_, ...) return generic() end
 end })
--- Tab only had CreateSection hard-coded; give it the same catch-all Window already has so
--- adding new Tab-level UI methods (like AddProfileHeader) doesn't break this mock.
-local Tab = setmetatable({ CreateSection = function() return Section end }, { __index = function(_, k)
-    return function(_, ...) return generic() end
-end })
+local Tab = { CreateSection = function() return Section end }
 local Window = setmetatable({ Theme = theme, ToggleKey = { Name = "RightShift" }, Flags = {} }, { __index = function(_, k)
     return function(_, ...) return generic() end
 end })
