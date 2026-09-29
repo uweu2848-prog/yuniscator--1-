@@ -1960,42 +1960,106 @@ function Window:CreateInfoBar(opts)
     Stats = ok and Stats or nil
 
     local bar = Make("Frame", {
-        Name = "InfoBar", Parent = self.Gui, Size = UDim2.fromOffset(0, 40), AutomaticSize = Enum.AutomaticSize.X,
-        AnchorPoint = Vector2.new(0.5, 0), Position = opts.Position or UDim2.new(0.5, 0, 0, 14),
-        BackgroundColor3 = Color3.fromRGB(10, 13, 24), BackgroundTransparency = 0.12, ZIndex = 70,
+        Name = "InfoBar", Parent = self.Gui, Size = UDim2.fromOffset(0, 52), AutomaticSize = Enum.AutomaticSize.X,
+        AnchorPoint = Vector2.new(0.5, 0), Position = opts.Position or UDim2.new(0.5, 0, 0, 16),
+        BackgroundColor3 = Color3.fromRGB(8, 6, 18), BackgroundTransparency = 0, BorderSizePixel = 0, ZIndex = 70,
     })
     Round(bar)
-    win:_stroke(bar, 1, 0.3)
+    local shade = Make("UIGradient", {
+        Parent = bar, Rotation = 90,
+        Color = ColorSequence.new(Color3.fromRGB(28, 22, 48), Color3.fromRGB(8, 6, 16)),
+    })
+    local rim = Make("UIStroke", {
+        Parent = bar, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.25,
+        Color = Color3.fromRGB(130, 60, 255), Transparency = 0.35,
+    })
+    local shadow = Make("Frame", {
+        Parent = bar, Size = UDim2.new(1, 18, 1, 14), Position = UDim2.new(0, -9, 0, 6),
+        BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.55, BorderSizePixel = 0, ZIndex = 69,
+    })
+    Round(shadow)
+    local sheen = Make("Frame", {
+        Parent = bar, Size = UDim2.new(1, -72, 0, 1), Position = UDim2.new(0, 36, 0, 1),
+        BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.82, BorderSizePixel = 0, ZIndex = 72,
+    })
 
     local row = Make("Frame", {
-        Parent = bar, Size = UDim2.fromOffset(0, 40), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, ZIndex = 71,
+        Parent = bar, Size = UDim2.fromOffset(0, 52), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, ZIndex = 71,
     })
-    Make("UIPadding", { Parent = row, PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) })
+    Make("UIPadding", { Parent = row, PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) })
     Make("UIListLayout", {
-        Parent = row, FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 12),
+        Parent = row, FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center,
+        Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder,
     })
 
-    local function stat(icon)
-        local holder = Make("Frame", { Parent = row, Size = UDim2.fromOffset(0, 40), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, ZIndex = 71 })
-        Make("UIListLayout", { Parent = holder, FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 4) })
-        Make("TextLabel", { Parent = holder, Size = UDim2.fromOffset(16, 40), BackgroundTransparency = 1, Text = icon, TextSize = 14, Font = Enum.Font.GothamBold, ZIndex = 71 })
-        local val = Make("TextLabel", {
-            Parent = holder, Size = UDim2.fromOffset(0, 40), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, Text = "…",
-            TextColor3 = win.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 71,
-        })
-        return holder, val
+    local order = 0
+    local function nextOrder()
+        order = order + 1
+        return order
     end
 
-    -- Player count, with a floating +1 / -1 badge whenever someone joins or leaves.
-    local countHolder, countLabel = stat("👥")
+    local function chip()
+        local holder = Make("Frame", {
+            Parent = row, LayoutOrder = nextOrder(), Size = UDim2.fromOffset(0, 34), AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 0.28, BorderSizePixel = 0, ZIndex = 71,
+        })
+        Corner(holder, 10)
+        Make("UIPadding", { Parent = holder, PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) })
+        Make("UIListLayout", {
+            Parent = holder, FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center,
+            Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder,
+        })
+        return holder
+    end
+
+    local function readout(parent, width, layout)
+        return Make("TextLabel", {
+            Parent = parent, LayoutOrder = layout, Size = UDim2.fromOffset(width, 34), BackgroundTransparency = 1,
+            Text = "—", TextColor3 = win.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 15,
+            TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 72,
+        })
+    end
+
+    local function unit(parent, text, layout)
+        local label = Make("TextLabel", {
+            Parent = parent, LayoutOrder = layout, Size = UDim2.fromOffset(0, 34), AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1, Text = text, Font = Enum.Font.Gotham, TextSize = 11, ZIndex = 72,
+        })
+        win:_bind(function(t) label.TextColor3 = t.TextDim end)
+        return label
+    end
+
+    win:_bind(function(t)
+        local base = t.MainBg or Color3.fromRGB(8, 6, 18)
+        local side = t.SidebarBg or base
+        bar.BackgroundColor3 = base
+        shade.Color = ColorSequence.new(side:Lerp(Color3.new(1, 1, 1), 0.16), base)
+        rim.Color = t.Accent
+        sheen.BackgroundColor3 = t.AccentLight or Color3.new(1, 1, 1)
+    end)
+
+    -- Player count, with a floating +1 / -1 whenever someone joins or leaves.
+    local countHolder = chip()
+    local dot = Make("Frame", {
+        Parent = countHolder, LayoutOrder = 1, Size = UDim2.fromOffset(7, 7),
+        BackgroundColor3 = win.Theme.AccentLight, BorderSizePixel = 0, ZIndex = 72,
+    })
+    Round(dot)
+    win:_bind(function(t)
+        countHolder.BackgroundColor3 = t.ToggleOff or t.SidebarBg
+        dot.BackgroundColor3 = t.AccentLight
+    end)
+    local countLabel = readout(countHolder, 28, 2)
     local function bump(delta)
         local color = delta > 0 and win.Theme.Success or win.Theme.Danger
+        local origin = countHolder.AbsolutePosition - bar.AbsolutePosition
+        local x = origin.X + countHolder.AbsoluteSize.X * 0.5
         local badge = Make("TextLabel", {
-            Parent = countHolder, Size = UDim2.fromOffset(30, 16), Position = UDim2.new(0, 20, 0, 2),
-            BackgroundTransparency = 1, TextTransparency = 0, Text = (delta > 0 and "+1" or "-1"), TextColor3 = color,
-            Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 72,
+            Parent = bar, AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromOffset(x, origin.Y),
+            Size = UDim2.fromOffset(28, 14), BackgroundTransparency = 1, Text = (delta > 0 and "+1" or "-1"),
+            TextColor3 = color, Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 74,
         })
-        Tween(badge, { Position = UDim2.new(0, 20, 0, -14), TextTransparency = 1 }, 0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        Tween(badge, { Position = UDim2.fromOffset(x, origin.Y - 14), TextTransparency = 1 }, 0.85, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
             .Completed:Connect(function() badge:Destroy() end)
     end
     local function refreshCount() countLabel.Text = tostring(#Players:GetPlayers()) end
@@ -2003,18 +2067,66 @@ function Window:CreateInfoBar(opts)
     win:_connect(Players.PlayerAdded, function() refreshCount(); bump(1) end)
     win:_connect(Players.PlayerRemoving, function()
         bump(-1)
-        task.defer(refreshCount) -- the leaving player is still in :GetPlayers() during PlayerRemoving itself
+        task.defer(refreshCount)
     end)
 
-    -- Ping + FPS
-    local _, pingLabel = stat("📶")
-    local _, fpsLabel = stat("⚡")
+    -- Ping: three bars that fill in as the connection gets better.
+    local pingHolder = chip()
+    win:_bind(function(t) pingHolder.BackgroundColor3 = t.ToggleOff or t.SidebarBg end)
+    local barsHost = Make("Frame", {
+        Parent = pingHolder, LayoutOrder = 1, Size = UDim2.fromOffset(13, 12), BackgroundTransparency = 1, ZIndex = 72,
+    })
+    local pingBars = {}
+    local barHeights = { 4, 8, 12 }
+    for i = 1, 3 do
+        local h = barHeights[i]
+        pingBars[i] = Make("Frame", {
+            Parent = barsHost, Size = UDim2.fromOffset(3, h), Position = UDim2.new(0, (i - 1) * 5, 1, -h),
+            BackgroundColor3 = Color3.fromRGB(120, 126, 150), BackgroundTransparency = 0.55,
+            BorderSizePixel = 0, ZIndex = 72,
+        })
+        Corner(pingBars[i], 1)
+    end
+    local pingLabel = readout(pingHolder, 36, 2)
+    unit(pingHolder, "ms", 3)
+
+    local fpsHolder = chip()
+    win:_bind(function(t) fpsHolder.BackgroundColor3 = t.ToggleOff or t.SidebarBg end)
+    local fpsLabel = readout(fpsHolder, 26, 1)
+    unit(fpsHolder, "fps", 2)
+
+    local function paintPing(ms)
+        local lit, color = 1, win.Theme.Danger
+        if ms <= 70 then
+            lit, color = 3, win.Theme.Success
+        elseif ms <= 140 then
+            lit, color = 2, win.Theme.Warning
+        end
+        pingLabel.TextColor3 = color
+        for i = 1, 3 do
+            pingBars[i].BackgroundColor3 = color
+            pingBars[i].BackgroundTransparency = i <= lit and 0 or 0.72
+        end
+    end
+
+    local function paintFps(fps)
+        local color = win.Theme.Danger
+        if fps >= 55 then
+            color = win.Theme.Success
+        elseif fps >= 30 then
+            color = win.Theme.Warning
+        end
+        fpsLabel.TextColor3 = color
+    end
+
     do
         local frames, acc = 0, 0
         win:_connect(RunService.RenderStepped, function(dt)
             frames, acc = frames + 1, acc + dt
             if acc >= 0.5 then
-                fpsLabel.Text = tostring(math.floor(frames / acc + 0.5))
+                local fps = math.floor(frames / acc + 0.5)
+                fpsLabel.Text = tostring(fps)
+                paintFps(fps)
                 frames, acc = 0, 0
             end
         end)
@@ -2024,41 +2136,110 @@ function Window:CreateInfoBar(opts)
                 if Stats then
                     pingOk, ping = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
                 end
-                pingLabel.Text = (pingOk and ping and (tostring(math.floor(ping)) .. "ms")) or "—"
+                if pingOk and ping then
+                    local ms = math.floor(ping + 0.5)
+                    pingLabel.Text = tostring(ms)
+                    paintPing(ms)
+                else
+                    pingLabel.Text = "—"
+                    pingLabel.TextColor3 = win.Theme.TextDim
+                end
                 task.wait(1)
             end
         end)
     end
 
-    Make("Frame", { Parent = row, Size = UDim2.new(0, 1, 0, 20), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.85, ZIndex = 71 })
+    local divider = Make("Frame", {
+        Parent = row, LayoutOrder = nextOrder(), Size = UDim2.fromOffset(1, 22),
+        BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.78, BorderSizePixel = 0, ZIndex = 71,
+    })
+    win:_bind(function(t) divider.BackgroundColor3 = t.AccentLight or Color3.new(1, 1, 1) end)
 
-    local function iconBtn(icon, onClick)
-        local b = Make("TextButton", {
-            Parent = row, Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 0.4, Text = icon,
-            TextSize = 13, Font = Enum.Font.GothamBold, AutoButtonColor = false, ZIndex = 71,
+    local function mark(parent, size, pos)
+        return Make("Frame", {
+            Parent = parent, AnchorPoint = Vector2.new(0.5, 0.5), Position = pos, Size = size,
+            BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Active = false, ZIndex = 73,
         })
-        win:_bind(function(t) b.BackgroundColor3 = t.ToggleOff end)
-        Corner(b, 8)
-        win:_fx(b, { Grow = 1.1 })
+    end
+
+    local function iconBtn(draw, onClick)
+        local b = Make("TextButton", {
+            Parent = row, LayoutOrder = nextOrder(), Size = UDim2.fromOffset(32, 32), BackgroundTransparency = 0.2,
+            Text = "", AutoButtonColor = false, ZIndex = 71,
+        })
+        Round(b)
+        local edge = Make("UIStroke", {
+            Parent = b, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Transparency = 0.45,
+        })
+        win:_bind(function(t)
+            b.BackgroundColor3 = t.ToggleOff or t.SidebarBg
+            edge.Color = t.Accent
+        end)
+        draw(b)
+        win:_fx(b, { Grow = 1.08 })
         b.MouseButton1Click:Connect(function() win:_play("Click"); Fire(onClick) end)
         return b
     end
 
-    iconBtn("⚙️", opts.OnSettings or function() win:Toggle(true) end)
-    if opts.OnGlobe then iconBtn("🌐", opts.OnGlobe) end
-    if opts.OnDiscord then iconBtn("💬", opts.OnDiscord) end
+    iconBtn(function(b)
+        local hub = mark(b, UDim2.fromOffset(8, 8), UDim2.fromScale(0.5, 0.5))
+        hub.BackgroundTransparency = 1
+        Round(hub)
+        Make("UIStroke", { Parent = hub, Thickness = 1.4, Color = Color3.new(1, 1, 1) })
+        local core = mark(b, UDim2.fromOffset(3, 3), UDim2.fromScale(0.5, 0.5))
+        Round(core)
+        local teeth = {
+            UDim2.new(0.5, -1, 0.5, -8), UDim2.new(0.5, -1, 0.5, 5),
+            UDim2.new(0.5, -8, 0.5, -1), UDim2.new(0.5, 5, 0.5, -1),
+        }
+        local toothSize = {
+            UDim2.fromOffset(3, 4), UDim2.fromOffset(3, 4),
+            UDim2.fromOffset(4, 3), UDim2.fromOffset(4, 3),
+        }
+        for i = 1, 4 do
+            local tooth = mark(b, toothSize[i], teeth[i])
+            Corner(tooth, 1)
+        end
+    end, opts.OnSettings or function() win:Toggle(true) end)
 
-    -- Nametag button: a small circular badge (initials) at the end of the bar, echoing the
-    -- "click your own avatar to edit your tag" pattern instead of a plain square icon.
+    if opts.OnGlobe then
+        iconBtn(function(b)
+            local ring = mark(b, UDim2.fromOffset(14, 14), UDim2.fromScale(0.5, 0.5))
+            ring.BackgroundTransparency = 1
+            Round(ring)
+            Make("UIStroke", { Parent = ring, Thickness = 1.3, Color = Color3.new(1, 1, 1) })
+            mark(b, UDim2.fromOffset(12, 1), UDim2.fromScale(0.5, 0.5))
+            mark(b, UDim2.fromOffset(1, 12), UDim2.fromScale(0.5, 0.5))
+        end, opts.OnGlobe)
+    end
+
+    if opts.OnDiscord then
+        iconBtn(function(b)
+            local body = mark(b, UDim2.fromOffset(13, 9), UDim2.new(0.5, 0, 0.5, -1))
+            Corner(body, 3)
+            local tail = mark(b, UDim2.fromOffset(5, 5), UDim2.new(0.5, -3, 0.5, 4))
+            tail.Rotation = 45
+        end, opts.OnDiscord)
+    end
+
     if opts.OnNametag then
-        Make("Frame", { Parent = row, Size = UDim2.new(0, 1, 0, 20), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.85, ZIndex = 71 })
+        local letter = opts.NametagInitials
+        if type(letter) ~= "string" or letter == "" then
+            local name = (LocalPlayer and (LocalPlayer.DisplayName ~= "" and LocalPlayer.DisplayName or LocalPlayer.Name)) or "S"
+            local ch = string.match(string.sub(name, 1, 1), "%a") or "S"
+            letter = string.upper(ch)
+        end
         local badge = Make("TextButton", {
-            Parent = row, Size = UDim2.fromOffset(28, 28), Text = opts.NametagInitials or "🏷", AutoButtonColor = false,
-            Font = Enum.Font.GothamBlack, TextSize = 12, TextColor3 = Color3.new(1, 1, 1), ZIndex = 71,
+            Parent = row, LayoutOrder = nextOrder(), Size = UDim2.fromOffset(34, 34), Text = letter,
+            Font = Enum.Font.GothamBlack, TextSize = 15, TextColor3 = Color3.new(1, 1, 1),
+            AutoButtonColor = false, ZIndex = 71,
         })
-        win:_bind(function(t) badge.BackgroundColor3 = t.Accent end)
         Round(badge)
-        win:_fx(badge, { Grow = 1.1, NoFade = true })
+        local badgeGrad = Make("UIGradient", { Parent = badge, Rotation = 35 })
+        win:_bind(function(t)
+            badgeGrad.Color = ColorSequence.new(t.AccentLight or t.Accent, t.Accent)
+        end)
+        win:_fx(badge, { Grow = 1.08, NoFade = true })
         badge.MouseButton1Click:Connect(function() win:_play("Click"); Fire(opts.OnNametag) end)
     end
 
