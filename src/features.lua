@@ -1352,8 +1352,178 @@ function Features.Start(opts)
     end)
 end
 
+-- ── anti voice chat ───────────────────────────────────────────────────────
+-- One-shot. Hides the real mic button and leaves a local mute control.
+local vcBusy = false
+local vcOn = false
+local vcOrigButton = nil
+local vcClone = nil
+local vcFolder = nil
+local vcDisabled = {}
+local VC_MUTED = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
+
+local function vcRestore()
+    if vcClone and vcClone.Parent and vcOrigButton then
+        local parent = vcClone.Parent
+        pcall(function() vcClone:Destroy() end)
+        pcall(function() vcOrigButton.Parent = parent end)
+    elseif vcClone then
+        pcall(function() vcClone:Destroy() end)
+    end
+    vcClone = nil
+    vcOrigButton = nil
+    if vcFolder then
+        pcall(function() vcFolder:Destroy() end)
+        vcFolder = nil
+    end
+    for i = 1, #vcDisabled do
+        local c = vcDisabled[i]
+        if c and type(c.Enable) == "function" then
+            pcall(function() c:Enable() end)
+        end
+    end
+    vcDisabled = {}
+    vcOn = false
+    vcBusy = false
+end
+
+local function vcIcon(button)
+    local frame = button:WaitForChild("IntegrationIconFrame", 15)
+    local icon = frame:WaitForChild("IntegrationIcon", 15)
+    return icon:WaitForChild("1", 15)
+end
+
+local function vcFindMic(core)
+    local desc = core:GetDescendants()
+    for i = 1, #desc do
+        local v = desc[i]
+        if v.Name == "toggle_mic_mute" then
+            return v, v.Parent
+        end
+    end
+    return nil, nil
+end
+
+function Features.RunAntiVC(onStatus)
+    if vcOn then return true, "Anti VC is already on" end
+    if vcBusy then return false, "Anti VC is already running" end
+    vcBusy = true
+    local function say(status)
+        if type(onStatus) == "function" then pcall(onStatus, status) end
+    end
+    local ran, err = pcall(function()
+        if type(getconnections) ~= "function" then
+            error("This executor has no getconnections")
+        end
+        local getCons = getconnections
+        if type(clonefunction) == "function" then
+            local ok, cloned = pcall(clonefunction, getconnections)
+            if ok and type(cloned) == "function" then getCons = cloned end
+        end
+        local function ref(obj)
+            if type(cloneref) ~= "function" then return obj end
+            local ok, cloned = pcall(cloneref, obj)
+            if ok and cloned then return cloned end
+            return obj
+        end
+
+        local VoiceChatService = ref(game:GetService("VoiceChatService"))
+        local VoiceChatInternal = ref(game:GetService("VoiceChatInternal"))
+        local core = game:GetService("CoreGui")
+
+        local micButton, unibar = vcFindMic(core)
+        if not micButton then
+            pcall(function() VoiceChatService:joinVoice() end)
+            local started = tick()
+            while not micButton and tick() - started < 15 do
+                task.wait(0.5)
+                micButton, unibar = vcFindMic(core)
+            end
+        end
+        if not micButton or not unibar then error("Mic button not found") end
+
+        local icon = vcIcon(micButton)
+        if icon.Image == VC_MUTED then
+            say("Unmute your mic to finish Anti VC.")
+            local started = tick()
+            while icon.Image == VC_MUTED do
+                if tick() - started > 120 then error("Unmute timed out. Press Anti VC again.") end
+                task.wait(0.5)
+                if not icon.Parent then icon = vcIcon(micButton) end
+            end
+        end
+
+        pcall(function() VoiceChatService:leaveVoice() end)
+        task.wait(2)
+
+        local connections = getCons(VoiceChatInternal.StateChanged)
+        if type(connections) == "table" then
+            for i = 7, #connections do
+                local c = connections[i]
+                if c and type(c.Disable) == "function" then
+                    pcall(function() c:Disable() end)
+                    vcDisabled[#vcDisabled + 1] = c
+                end
+            end
+        end
+
+        task.wait(2)
+        pcall(function() VoiceChatService:joinVoice() end)
+
+        local again = unibar:FindFirstChild("toggle_mic_mute")
+        if not again then again = unibar:WaitForChild("toggle_mic_mute", 15) end
+        if not again then error("Mic button not found after rejoin") end
+        micButton = again
+
+        local folder = Instance.new("Folder")
+        folder.Name = "ScorpVC"
+        folder.Parent = game:GetService("RobloxReplicatedStorage")
+        vcFolder = folder
+
+        local clone = micButton:Clone()
+        micButton.Parent = folder
+        vcOrigButton = micButton
+        clone.Name = "toggle_mic_mute_new"
+        clone.Parent = unibar
+        vcClone = clone
+
+        local clonedIcon = vcIcon(clone)
+        local originalIcon = vcIcon(micButton)
+        local function paused()
+            return VoiceChatInternal:IsPublishPaused()
+        end
+        local function setPaused(state)
+            VoiceChatInternal:PublishPause(state)
+        end
+
+        setPaused(true)
+        clonedIcon.Image = VC_MUTED
+
+        local hit = clone:WaitForChild("IconHitArea_toggle_mic_mute", 15)
+        hit.Activated:Connect(function()
+            local newState = not paused()
+            setPaused(newState)
+            if newState then
+                clonedIcon.Image = VC_MUTED
+            else
+                clonedIcon.Image = originalIcon.Image
+            end
+        end)
+    end)
+    vcBusy = false
+    if not ran then
+        pcall(vcRestore)
+        local msg = tostring(err)
+        local short = string.match(msg, ": (.+)$")
+        return false, short or msg
+    end
+    vcOn = true
+    return true, "Anti VC on"
+end
+
 function Features.Cleanup()
     alive = false
+    pcall(vcRestore)
     cframeOn, noclipOn, flyOn, gravOn = false, false, false, false
     hitboxOn, espOn, airOn, platOn = false, false, false, false
     invisOn, fcOn, voidOn, antiflingOn = false, false, false, false
