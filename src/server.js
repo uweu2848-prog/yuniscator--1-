@@ -783,9 +783,26 @@ app.post('/api/session', sessionLimiter, (req, res) => {
 
     const claims = { v: 1, n: nonce, u: userId, nm: username, h: hwid, iat: now(), exp: now() + CONFIG.TOKEN_TTL_MS, ok: ownerOk ? 1 : 0 };
     const token = signToken(claims);
-    issued.set(nonce, { userId, username, hwid, ip, issuedAt: now(), confirmed: !!b.resume, alerted: false, ownerOk });
+    issued.set(nonce, { userId, username, hwid, ip, executor, platform, issuedAt: now(), confirmed: !!b.resume, alerted: false, ownerOk });
 
     if (b.resume) return res.json({ ok: true, token, hb: CONFIG.HEARTBEAT_SECONDS });
+
+    // A fresh (non-resume) session means someone just ran the script for the first time
+    // this session. Optional — off by default so you're not pinged on every single join.
+    if (CONFIG.JOIN_ALERTS) {
+        alert({
+            title: '🟢 Script executed',
+            color: 0x2ecc71,
+            fields: [
+                { name: 'Username', value: `\`${username}\``, inline: true },
+                { name: 'User ID', value: `\`${userId}\``, inline: true },
+                { name: 'Owner', value: ownerOk ? 'Yes' : 'No', inline: true },
+                { name: 'Executor', value: `\`${executor}\``, inline: true },
+                { name: 'Platform', value: `\`${platform}\``, inline: true },
+                { name: 'IP', value: `\`${ip}\``, inline: true },
+            ],
+        });
+    }
 
     const build = ensureBuilt();
     if (!build) return res.status(503).json({ ok: false, error: 'payload not built yet' });
