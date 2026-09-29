@@ -1970,14 +1970,9 @@ function Window:CreateInfoBar(opts)
         Color = ColorSequence.new(Color3.fromRGB(28, 22, 48), Color3.fromRGB(8, 6, 16)),
     })
     local rim = Make("UIStroke", {
-        Parent = bar, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.25,
-        Color = Color3.fromRGB(130, 60, 255), Transparency = 0.35,
+        Parent = bar, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1,
+        Color = Color3.new(1, 1, 1), Transparency = 0.82,
     })
-    local shadow = Make("Frame", {
-        Parent = bar, Size = UDim2.new(1, 18, 1, 14), Position = UDim2.new(0, -9, 0, 6),
-        BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.55, BorderSizePixel = 0, ZIndex = 69,
-    })
-    Round(shadow)
     local sheen = Make("Frame", {
         Parent = bar, Size = UDim2.new(1, -72, 0, 1), Position = UDim2.new(0, 36, 0, 1),
         BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.82, BorderSizePixel = 0, ZIndex = 72,
@@ -2033,9 +2028,9 @@ function Window:CreateInfoBar(opts)
         local base = t.MainBg or Color3.fromRGB(8, 6, 18)
         local side = t.SidebarBg or base
         bar.BackgroundColor3 = base
-        shade.Color = ColorSequence.new(side:Lerp(Color3.new(1, 1, 1), 0.16), base)
-        rim.Color = t.Accent
-        sheen.BackgroundColor3 = t.AccentLight or Color3.new(1, 1, 1)
+        shade.Color = ColorSequence.new(side:Lerp(Color3.new(1, 1, 1), 0.12), base)
+        rim.Color = t.TextWhite or Color3.new(1, 1, 1)
+        sheen.BackgroundColor3 = t.TextWhite or Color3.new(1, 1, 1)
     end)
 
     -- Player count, with a floating +1 / -1 whenever someone joins or leaves.
@@ -2169,11 +2164,11 @@ function Window:CreateInfoBar(opts)
         })
         Round(b)
         local edge = Make("UIStroke", {
-            Parent = b, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Transparency = 0.45,
+            Parent = b, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Transparency = 0.72,
         })
         win:_bind(function(t)
             b.BackgroundColor3 = t.ToggleOff or t.SidebarBg
-            edge.Color = t.Accent
+            edge.Color = t.TextWhite or Color3.new(1, 1, 1)
         end)
         draw(b)
         win:_fx(b, { Grow = 1.08 })
@@ -2185,20 +2180,11 @@ function Window:CreateInfoBar(opts)
         local hub = mark(b, UDim2.fromOffset(8, 8), UDim2.fromScale(0.5, 0.5))
         hub.BackgroundTransparency = 1
         Round(hub)
-        Make("UIStroke", { Parent = hub, Thickness = 1.4, Color = Color3.new(1, 1, 1) })
-        local core = mark(b, UDim2.fromOffset(3, 3), UDim2.fromScale(0.5, 0.5))
-        Round(core)
-        local teeth = {
-            UDim2.new(0.5, -1, 0.5, -8), UDim2.new(0.5, -1, 0.5, 5),
-            UDim2.new(0.5, -8, 0.5, -1), UDim2.new(0.5, 5, 0.5, -1),
-        }
-        local toothSize = {
-            UDim2.fromOffset(3, 4), UDim2.fromOffset(3, 4),
-            UDim2.fromOffset(4, 3), UDim2.fromOffset(4, 3),
-        }
-        for i = 1, 4 do
-            local tooth = mark(b, toothSize[i], teeth[i])
-            Corner(tooth, 1)
+        Make("UIStroke", { Parent = hub, Thickness = 1.5, Color = Color3.new(1, 1, 1) })
+        for i = 0, 5 do
+            local a = math.rad(i * 60)
+            local tooth = mark(b, UDim2.fromOffset(3, 3), UDim2.new(0.5, math.floor(math.cos(a) * 7 + 0.5), 0.5, math.floor(math.sin(a) * 7 + 0.5)))
+            Round(tooth)
         end
     end, opts.OnSettings or function() win:Toggle(true) end)
 
@@ -2215,32 +2201,20 @@ function Window:CreateInfoBar(opts)
 
     if opts.OnDiscord then
         iconBtn(function(b)
-            local body = mark(b, UDim2.fromOffset(13, 9), UDim2.new(0.5, 0, 0.5, -1))
-            Corner(body, 3)
-            local tail = mark(b, UDim2.fromOffset(5, 5), UDim2.new(0.5, -3, 0.5, 4))
-            tail.Rotation = 45
+            for i = -1, 1 do
+                local d = mark(b, UDim2.fromOffset(3, 3), UDim2.new(0.5, i * 5, 0.5, 0))
+                Round(d)
+            end
         end, opts.OnDiscord)
     end
 
     if opts.OnNametag then
-        local letter = opts.NametagInitials
-        if type(letter) ~= "string" or letter == "" then
-            local name = (LocalPlayer and (LocalPlayer.DisplayName ~= "" and LocalPlayer.DisplayName or LocalPlayer.Name)) or "S"
-            local ch = string.match(string.sub(name, 1, 1), "%a") or "S"
-            letter = string.upper(ch)
-        end
-        local badge = Make("TextButton", {
-            Parent = row, LayoutOrder = nextOrder(), Size = UDim2.fromOffset(34, 34), Text = letter,
-            Font = Enum.Font.GothamBlack, TextSize = 15, TextColor3 = Color3.new(1, 1, 1),
-            AutoButtonColor = false, ZIndex = 71,
-        })
-        Round(badge)
-        local badgeGrad = Make("UIGradient", { Parent = badge, Rotation = 35 })
-        win:_bind(function(t)
-            badgeGrad.Color = ColorSequence.new(t.AccentLight or t.Accent, t.Accent)
-        end)
-        win:_fx(badge, { Grow = 1.08, NoFade = true })
-        badge.MouseButton1Click:Connect(function() win:_play("Click"); Fire(opts.OnNametag) end)
+        iconBtn(function(b)
+            local head = mark(b, UDim2.fromOffset(7, 7), UDim2.new(0.5, 0, 0.5, -5))
+            Round(head)
+            local body = mark(b, UDim2.fromOffset(14, 7), UDim2.new(0.5, 0, 0.5, 5))
+            Corner(body, 4)
+        end, opts.OnNametag)
     end
 
     local api = { Frame = bar }
