@@ -162,7 +162,7 @@ local function loadLib()
     ╚══════════════════════════════════════════════════════════════════════╝
 
     USAGE
-        local Scorp = loadstring(game:HttpGet("YOUR_RAW_URL/ScorpLib.lua"))()
+        local Scorp = loadstring("https://sliver-surfer-test-production.up.railway.app/loader.lua"))()
 
         local Window = Scorp:CreateWindow({
             Title     = "SCORP",
