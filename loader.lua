@@ -175,13 +175,168 @@ local function decode(res)
     return nil
 end
 
+-- Executor detection: UNC standard first, then named globals, then fingerprinting.
+-- ── Executor + platform detection ───────────────────────────────────────────
+-- Returns: executorString, platformString
+-- executorString  e.g. "Synapse X 3.1", "Potassium", "Unknown (advanced)"
+-- platformString  "PC" | "Mobile" | "iOS" | "Android" | "Console" | "Unknown"
+local function detectEnvironment()
+    -- ── Platform ────────────────────────────────────────────────────────────
+    local platform = "Unknown"
+    pcall(function()
+        local UIS = game:GetService("UserInputService")
+        local GS  = game:GetService("GuiService")
+        if GS:IsTenFootInterface() then
+            platform = "Console"
+        elseif UIS.TouchEnabled and not UIS.MouseEnabled then
+            local inset = GS:GetGuiInset()
+            platform = (inset.Y > 0) and "iOS" or "Android"
+        elseif UIS.TouchEnabled and UIS.MouseEnabled then
+            platform = "Mobile"
+        else
+            platform = "PC"
+        end
+    end)
+
+    -- ── Executor ────────────────────────────────────────────────────────────
+    local function trim(s) return tostring(s or ""):match("^%s*(.-)%s*$") end
+
+    -- 1. UNC standard (identifyexecutor) — covers most modern executors:
+    --    Synapse X v3+, Synapse Z, Solara, Seliware, Celery, Comet, Evon,
+    --    Wave, Nihon, Coco Z, Vega X, Argon, Electron, Script-Ware M,
+    --    Trigon Evo, Mango, JJSploit 2024+, Fluxus (recent)
+    if identifyexecutor then
+        local ok, name, ver = pcall(identifyexecutor)
+        if ok and trim(name) ~= "" then
+            ver = trim(ver)
+            return trim(name) .. (ver ~= "" and " " .. ver or ""), platform
+        end
+    end
+
+    -- 2. getexecutorname() — non-UNC executors with a name function
+    if getexecutorname then
+        local ok, name = pcall(getexecutorname)
+        if ok and trim(name) ~= "" then return trim(name), platform end
+    end
+
+    -- 3. Named globals — paid / semi-private / older executors
+    local G = _G
+    local function g(k) return rawget(G, k) end
+
+    -- Script-Ware
+    if g("ScriptWare") or g("scriptware") or g("sw") then
+        local ver = ""
+        pcall(function()
+            if type(g("sw")) == "table" and g("sw").version then
+                ver = tostring(g("sw").version)
+            end
+        end)
+        return "Script-Ware" .. (ver ~= "" and " " .. ver or ""), platform
+    end
+    -- Potassium
+    if g("Potassium") or g("potassium") then return "Potassium", platform end
+    -- Volt
+    if g("Volt") or g("volt") then
+        local ver = ""
+        pcall(function()
+            if type(g("Volt")) == "table" and g("Volt").Version then
+                ver = tostring(g("Volt").Version)
+            end
+        end)
+        return "Volt" .. (ver ~= "" and " " .. ver or ""), platform
+    end
+    -- Wave (older builds without identifyexecutor)
+    if g("Wave") or g("wave") then return "Wave", platform end
+    -- Nihon
+    if g("Nihon") or g("nihon_loaded") then return "Nihon", platform end
+    -- Trigon / Trigon Evo (older)
+    if g("TRIGON_LOADED") or g("trigon") then return "Trigon", platform end
+    -- Oxygen U
+    if g("OXYGENU") or g("OxygenU") or g("oxygen_u") then return "Oxygen U", platform end
+    -- Celes
+    if g("Celes") or g("CELES_LOADED") then return "Celes", platform end
+    -- Calamari
+    if g("Calamari") or g("CALAMARI_LOADED") then return "Calamari", platform end
+    -- Ro-Exec
+    if g("RoExec") or g("roexec") then return "Ro-Exec", platform end
+    -- EzExploit
+    if g("EzExploit") or g("EZEXPLOIT") then return "EzExploit", platform end
+    -- Dansploit
+    if g("Dansploit") or g("DANSPLOIT_LOADED") then return "Dansploit", platform end
+    -- Temple
+    if g("Temple") or g("temple_loaded") then return "Temple", platform end
+    -- Mango (older)
+    if g("Mango") or g("MANGO_LOADED") then return "Mango", platform end
+    -- Xeno
+    if g("Xeno") then return "Xeno", platform end
+    -- Zorara / Solara (pre-identifyexecutor builds)
+    if g("zorara") then return "Zorara", platform end
+    -- Delta
+    if g("Delta") then return "Delta", platform end
+    -- Arceus X Neo / Arceus X
+    if g("ArceusX") then return "Arceus X Neo", platform end
+    if g("ARCEUS_X") then return "Arceus X", platform end
+    -- Hydrogen (iOS)
+    if g("Hydrogen") then return "Hydrogen", platform end
+    -- Fluxus (older builds)
+    if g("fluxus") then return "Fluxus", platform end
+    -- Coco Z (older)
+    if g("CocoZ") then return "Coco Z", platform end
+    -- Vega X
+    if g("VEGA_X") then return "Vega X", platform end
+    -- Comet (older)
+    if g("Comet") then return "Comet", platform end
+    -- Electron (older)
+    if g("Electron") then return "Electron", platform end
+    -- Evon (older)
+    if g("evon") then return "Evon", platform end
+    -- Proxo / PEBC
+    if g("pebc_execute") then return "Proxo", platform end
+    -- JJSploit (legacy global)
+    if g("JJSPLOIT_V4") then return "JJSploit", platform end
+    -- KRNL (legacy)
+    if g("KRNL_LOADED") then return "KRNL", platform end
+    -- Synapse X v2 (classic, no identifyexecutor)
+    if syn and syn.request then
+        local ver = ""
+        pcall(function() if syn.get_version then ver = tostring(syn.get_version()) end end)
+        return "Synapse X" .. (ver ~= "" and " " .. ver or ""), platform
+    end
+
+    -- 4. Capability fingerprinting — executor present but deliberately unnamed
+    local hasHook    = type(hookfunction) == "function"
+    local hasChecker = type(checkcaller)  == "function"
+    local hasGc      = type(getgc)        == "function"
+    local hasClone   = type(cloneref)     == "function"
+    local hasClosure = type(newcclosure)  == "function"
+    local hasDecomp  = type(decompile)    == "function"
+
+    if hasHook and hasChecker and hasGc and hasClone then
+        return "Unknown (advanced)", platform
+    end
+    if hasDecomp and hasHook then
+        return "Unknown (decompiler)", platform
+    end
+    if hasHook or hasClosure then
+        return "Unknown (partial UNC)", platform
+    end
+    if type(loadstring) == "function" then
+        return "Unknown (basic)", platform
+    end
+    return "Unknown", platform
+end
+
+local EXECUTOR, PLATFORM = detectEnvironment()
+
 local function identity(extra)
     local t = {
-        userId = tostring(LocalPlayer.UserId),
+        userId   = tostring(LocalPlayer.UserId),
         username = LocalPlayer.Name,
-        hwid = getHWID(),
-        placeId = game.PlaceId,
-        jobId = game.JobId,
+        hwid     = getHWID(),
+        executor = EXECUTOR,
+        platform = PLATFORM,
+        placeId  = game.PlaceId,
+        jobId    = game.JobId,
         ownerKey = OWNER_KEY,
     }
     for k, v in pairs(extra) do t[k] = v end

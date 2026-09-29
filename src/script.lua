@@ -19,6 +19,82 @@ end
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
+-- ───────────────────────────────────────────────────────────────────────────
+--  Executor detection
+--  Priority order: identifyexecutor() (UNC standard, covers most modern
+--  executors) → named globals (legacy/non-UNC) → fingerprint checks.
+--  Returns a single clean string like "Synapse X 2.1.0" or "Unknown".
+-- ───────────────────────────────────────────────────────────────────────────
+local function detectExecutor()
+    -- UNC standard — supported by: Synapse X v3, Synapse Z, Solara, Seliware,
+    -- Celery, Evon, Comet, Electron, Wave, Nihon, Coco Z, Vega X, Argon, JJSploit (recent)
+    if identifyexecutor then
+        local ok, name, ver = pcall(identifyexecutor)
+        if ok and name and name ~= "" then
+            ver = tostring(ver or ""):gsub("^%s+", ""):gsub("%s+$", "")
+            return name .. (ver ~= "" and " " .. ver or "")
+        end
+    end
+
+    -- getexecutorname() — some executors that don't implement full UNC
+    if getexecutorname then
+        local ok, name = pcall(getexecutorname)
+        if ok and name and name ~= "" then return tostring(name) end
+    end
+
+    -- ── Paid / semi-private ──────────────────────────────────────────────
+    -- Potassium
+    if potassium or (typeof(potassium) ~= nil and rawget(_G, "potassium")) then return "Potassium" end
+    -- Volt
+    if volt or rawget(_G, "volt") then return "Volt" end
+    -- Xeno
+    if Xeno or rawget(_G, "Xeno") then return "Xeno" end
+    -- Zorara / Solara (older builds that predate identifyexecutor)
+    if zorara or rawget(_G, "zorara") then return "Zorara" end
+    -- Delta (free, widely used)
+    if Delta or rawget(_G, "Delta") then return "Delta" end
+    -- Arceus X / Arceus X Neo
+    if ARCEUS_X or rawget(_G, "ARCEUS_X") then return "Arceus X" end
+    if ArceusX or rawget(_G, "ArceusX") then return "Arceus X Neo" end
+    -- Hydrogen (iOS)
+    if Hydrogen or rawget(_G, "Hydrogen") then return "Hydrogen" end
+    -- Fluxus
+    if fluxus or rawget(_G, "fluxus") then return "Fluxus" end
+    -- Coco Z
+    if CocoZ or rawget(_G, "CocoZ") then return "Coco Z" end
+    -- Vega X
+    if VEGA_X or rawget(_G, "VEGA_X") then return "Vega X" end
+    -- Comet
+    if Comet or rawget(_G, "Comet") then return "Comet" end
+    -- Electron (check after identifyexecutor since Electron supports UNC)
+    if Electron or rawget(_G, "Electron") then return "Electron" end
+    -- Evon
+    if evon or rawget(_G, "evon") then return "Evon" end
+    -- Proxo / Pebc
+    if pebc_execute or rawget(_G, "pebc_execute") then return "Proxo" end
+    -- JJSploit (legacy global)
+    if JJSPLOIT_V4 or rawget(_G, "JJSPLOIT_V4") then return "JJSploit" end
+    -- Krnl (legacy — modern builds use identifyexecutor)
+    if KRNL_LOADED or rawget(_G, "KRNL_LOADED") then return "KRNL" end
+    -- Synapse X (classic — v3 uses identifyexecutor)
+    if syn and syn.request then return "Synapse X" end
+
+    -- ── Capability fingerprinting (no named globals at all) ──────────────
+    -- Executors that expose custom globals without a name we can check
+    if type(hookfunction) == "function" and type(checkcaller) == "function"
+       and type(getgc) == "function" and type(cloneref) == "function" then
+        -- All four present → almost certainly a paid/advanced executor
+        return "Unknown (advanced)"
+    end
+    if type(hookfunction) == "function" or type(newcclosure) == "function" then
+        return "Unknown (partial UNC)"
+    end
+
+    return "Unknown"
+end
+
+local EXECUTOR = detectExecutor()
+
 -- Nametag system (design + sync live in src/nametags.lua; the build inlines it here)
 local Nametags = (function()
 --@include nametags.lua
@@ -372,7 +448,7 @@ do
     local sec = Misc:CreateSection("Staff panel", false)
     local status = sec:AddLabel("Staff: loading…", { Wrap = true, Color = Window.Theme.TextDim })
     task.spawn(function()
-        Features.Start({ request = ctx.request })
+        Features.Start({ request = ctx.request, executor = EXECUTOR })
         status:Set(Features.StaffStatus())
     end)
     local targetBox = sec:AddTextbox("Target", {

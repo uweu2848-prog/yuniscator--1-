@@ -75,6 +75,8 @@ const CONFIG = {
     STRIKE_SCORE: num(env.STRIKE_SCORE, 2),             // a session needs at least this score to count as a strike
     SUSPICIOUS_IDENTITY_COUNT: 3,
     SUSPICIOUS_WINDOW_MS: 60 * 60 * 1000,
+    JOIN_ALERTS: flag(env.JOIN_ALERTS, false), // set JOIN_ALERTS=true in .env to get a Discord ping on every connect
+    SESSION_HISTORY_MAX: num(env.SESSION_HISTORY_MAX, 200), // how many past sessions to keep in memory
 };
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -400,8 +402,16 @@ function banInfo(root) {
 // ────────────────────────────────────────────────────────────────────────────
 // Sessions, presence, roles
 // ────────────────────────────────────────────────────────────────────────────
-const issued = new Map();    // nonce -> { userId, username, hwid, ip, issuedAt, confirmed, alerted, ownerOk }
+const issued = new Map();    // nonce -> { userId, username, hwid, ip, executor, platform, issuedAt, confirmed, alerted, ownerOk }
 const presence = new Map();  // userId -> { userId, username, displayName, jobId, placeId, lastSeen }
+
+// Ring buffer of completed/expired sessions — survives the issued map TTL cleanup.
+// Lets you see who used the script in the last N sessions even after they left.
+const sessionHistory = [];
+function pushHistory(entry) {
+    sessionHistory.push({ ...entry, endedAt: now() });
+    while (sessionHistory.length > CONFIG.SESSION_HISTORY_MAX) sessionHistory.shift();
+}
 const lastIssue = new Map(); // identity -> ts (cooldown)
 const strikes = new Map();   // root -> Set(nonce)
 const alertSeen = new Map(); // throttle key -> ts
@@ -641,7 +651,7 @@ function handleFlags(who, rawCodes, source) {
 setInterval(() => {
     const t = now();
     for (const [nonce, s] of issued) {
-        if (t - s.issuedAt > 10 * 60 * 1000) { issued.delete(nonce); continue; }
+        if (t - s.issuedAt > 10 * 60 * 1000) { pushHistory(s); issued.delete(nonce); continue; }
         if (!s.confirmed && !s.alerted && !s.ownerOk && t - s.issuedAt > CONFIG.UNCONFIRMED_AFTER_MS) {
             s.alerted = true;
             alert({
@@ -745,6 +755,8 @@ app.post('/api/session', sessionLimiter, (req, res) => {
     if (!isDigits(userId)) return res.status(400).json({ ok: false, error: 'bad userId' });
     const username = cleanStr(b.username, 40) || 'Unknown';
     const hwid = cleanStr(b.hwid, 200) || 'UNKNOWN_HWID';
+    const executor = cleanStr(b.executor, 80) || 'Unknown';
+    const platform = cleanStr(b.platform, 20) || 'Unknown';
     const ip = clientIp(req);
     const ownerOk = ownerKeyOk(b.ownerKey);
     const who = { userId, username, hwid, ip, ownerOk, nonce: null };
@@ -854,9 +866,6 @@ app.post('/api/nametags/editor-link', editorLinkLimiter, requireToken, (req, res
 });
 
 app.get('/tag', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'tag-editor.html')));
-app.get('/brand/scorp-logo.png', (_req, res) => {
-    res.type('image/jpeg').sendFile(path.join(ROOT, 'public', 'scorp-logo.png'));
-});
 
 app.get('/api/tag-session/:code', requireEditorCode, (req, res) => {
     res.json({
@@ -905,7 +914,75 @@ app.get('/api/admin/sessions', (_req, res) => {
     const t = now();
     const live = [...presence.values()].filter(p => t - p.lastSeen <= CONFIG.PRESENCE_TTL_MS);
     const pending = [...issued.values()].filter(s => !s.confirmed);
-    res.json({ issuedTracked: issued.size, unconfirmed: pending.length, online: live.length, users: live.map(p => ({ userId: p.userId, username: p.username, jobId: p.jobId, ...roleFor(p.userId) })) });
+
+    // Build userId → issued-session lookup for enriching presence records
+    const issuedByUser = new Map();
+    for (const s of issued.values()) issuedByUser.set(s.userId, s);
+
+    res.json({
+        issuedTracked: issued.size,
+        unconfirmed: pending.length,
+        online: live.length,
+        users: live.map(p => {
+            const s = issuedByUser.get(p.userId) || {};
+            return {
+                userId: p.userId,
+                username: p.username,
+                jobId: p.jobId,
+                placeId: p.placeId || null,
+                executor: s.executor || 'Unknown',
+                platform: s.platform || 'Unknown',
+                joinedAgo: s.issuedAt ? Math.round((t - s.issuedAt) / 1000) : null,
+                ...roleFor(p.userId),
+            };
+        }),
+    });
+});
+
+// Executor usage stats across all currently-tracked issued sessions
+app.get('/api/admin/executor-stats', (_req, res) => {
+    const counts = {};
+    const platforms = {};
+    for (const s of issued.values()) {
+        const exe = s.executor || 'Unknown';
+        const plat = s.platform || 'Unknown';
+        counts[exe] = (counts[exe] || 0) + 1;
+        platforms[plat] = (platforms[plat] || 0) + 1;
+    }
+    // Also tally from history so stats survive session expiry
+    for (const s of sessionHistory) {
+        const exe = s.executor || 'Unknown';
+        const plat = s.platform || 'Unknown';
+        counts[exe] = (counts[exe] || 0) + 1;
+        platforms[plat] = (platforms[plat] || 0) + 1;
+    }
+    const executors = Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, total]) => ({ name, total }));
+    res.json({ executors, platforms, totalSessions: Object.values(counts).reduce((a, b) => a + b, 0) });
+});
+
+// Recent session history (last SESSION_HISTORY_MAX entries)
+app.get('/api/admin/history', (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 50, CONFIG.SESSION_HISTORY_MAX);
+    const slice = sessionHistory.slice(-limit).reverse(); // newest first
+    res.json({
+        total: sessionHistory.length,
+        limit,
+        sessions: slice.map(s => ({
+            userId: s.userId,
+            username: s.username,
+            executor: s.executor || 'Unknown',
+            platform: s.platform || 'Unknown',
+            ip: s.ip,
+            hwid: s.hwid,
+            issuedAt: s.issuedAt,
+            endedAt: s.endedAt,
+            durationSeconds: s.endedAt && s.issuedAt ? Math.round((s.endedAt - s.issuedAt) / 1000) : null,
+            confirmed: s.confirmed,
+            ownerOk: s.ownerOk,
+        })),
+    });
 });
 
 app.get('/api/admin/blacklist', (_req, res) => {
