@@ -136,19 +136,19 @@ end)()
 -- ───────────────────────────────────────────────────────────────────────────
 Window = Scorp:CreateWindow({
     Title        = "SCORP",
-    Subtitle     = "Made By Yuniku",
-    Theme        = "Rayfield",
-    Flat         = true,
-    Starfield    = false,
-    ToggleKey    = Enum.KeyCode.K,
+    Subtitle     = "Deep Space · Made By Yuniku · v0.1",
+    Theme        = "Cosmic Void",
+    ToggleKey    = Enum.KeyCode.RightShift,
     UnloadKey    = Enum.KeyCode.Delete,
     WidgetText   = "SCORP",
     LogoIcon     = "✦",
     ConfigFolder = "Scorp",
+    BackgroundImage = "rbxassetid://0",
+    BackgroundImageTransparency = 0.5,
     StartHidden  = splash ~= nil,
 })
 
-Window:SetWatermark('<font color="rgb(80,105,255)">Scorp</font>  ·  Made By Yuniku')
+Window:SetWatermark('<font color="rgb(168,186,214)">Scorp</font>  ·  placeholder build')
 
 -- Start nametag sync BEFORE building the tag editor below, so its "load my saved
 -- design" step has a real session (cfg) to sync with instead of racing it.

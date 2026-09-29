@@ -217,26 +217,21 @@ local BASE = {
 -- Accent      = main chrome colour (borders, sliders, toggles)
 -- AccentLight = the "Power Cosmic" glow that trails the chrome sheen
 Library.Themes = {
-    -- House theme: sharper chrome + hot violet-cyan streak, distinct from the plain "Silver Surfer" preset.
-    ["Nova Silver"]   = { Accent = Color3.fromRGB(196, 206, 230), AccentLight = Color3.fromRGB(150, 120, 255),
-                          MainBg = Color3.fromRGB(10, 11, 22), SidebarBg = Color3.fromRGB(7, 8, 17), ToggleOff = Color3.fromRGB(20, 21, 38) },
-    ["Silver Surfer"] = { Accent = Color3.fromRGB(168, 186, 214), AccentLight = Color3.fromRGB(90, 210, 255) },
-    ["Power Cosmic"]  = { Accent = Color3.fromRGB(70, 150, 255),  AccentLight = Color3.fromRGB(176, 110, 255),
-                          MainBg = Color3.fromRGB(14, 12, 38), SidebarBg = Color3.fromRGB(10, 9, 28), ToggleOff = Color3.fromRGB(28, 24, 56) },
-    ["Zenn-La"]       = { Accent = Color3.fromRGB(64, 196, 186),  AccentLight = Color3.fromRGB(255, 214, 120),
-                          MainBg = Color3.fromRGB(8, 22, 30), SidebarBg = Color3.fromRGB(6, 16, 23), ToggleOff = Color3.fromRGB(18, 38, 48) },
-    ["Deep Space"]    = { Accent = Color3.fromRGB(122, 132, 152), AccentLight = Color3.fromRGB(205, 214, 232),
-                          MainBg = Color3.fromRGB(12, 13, 17), SidebarBg = Color3.fromRGB(8, 9, 12), ToggleOff = Color3.fromRGB(26, 28, 36) },
-    -- Flat shell: near-black surfaces, one blue accent, hairline outline.
-    ["Rayfield"] = {
-        Accent = Color3.fromRGB(80, 105, 255), AccentLight = Color3.fromRGB(140, 156, 255),
-        MainBg = Color3.fromRGB(15, 15, 19), SidebarBg = Color3.fromRGB(8, 8, 10),
-        ToggleOff = Color3.fromRGB(26, 26, 32), TextWhite = Color3.fromRGB(237, 237, 242),
-        TextDim = Color3.fromRGB(139, 139, 147), Danger = Color3.fromRGB(235, 76, 76),
-        Stroke = Color3.fromRGB(46, 46, 54),
-    },
+    -- Default: Cosmic Void — deep purple + electric cyan
+    ["Cosmic Void"]   = { Accent = Color3.fromRGB(130, 60, 255),  AccentLight = Color3.fromRGB(0, 210, 255),
+                          MainBg = Color3.fromRGB(6, 5, 16), SidebarBg = Color3.fromRGB(4, 3, 11), ToggleOff = Color3.fromRGB(18, 14, 40) },
+    ["Nova Pulse"]    = { Accent = Color3.fromRGB(160, 80, 255),  AccentLight = Color3.fromRGB(80, 230, 255),
+                          MainBg = Color3.fromRGB(8, 6, 20), SidebarBg = Color3.fromRGB(5, 4, 14), ToggleOff = Color3.fromRGB(22, 16, 48) },
+    ["Nebula Blue"]   = { Accent = Color3.fromRGB(60, 130, 255),  AccentLight = Color3.fromRGB(140, 80, 255),
+                          MainBg = Color3.fromRGB(5, 8, 22), SidebarBg = Color3.fromRGB(3, 5, 15), ToggleOff = Color3.fromRGB(14, 20, 52) },
+    ["Solar Flare"]   = { Accent = Color3.fromRGB(255, 80, 60),   AccentLight = Color3.fromRGB(255, 180, 50),
+                          MainBg = Color3.fromRGB(14, 6, 6), SidebarBg = Color3.fromRGB(10, 4, 4), ToggleOff = Color3.fromRGB(32, 12, 12) },
+    ["Void Emerald"]  = { Accent = Color3.fromRGB(40, 220, 140),  AccentLight = Color3.fromRGB(100, 255, 200),
+                          MainBg = Color3.fromRGB(4, 12, 10), SidebarBg = Color3.fromRGB(3, 8, 7), ToggleOff = Color3.fromRGB(10, 28, 22) },
+    ["Silver Surfer"] = { Accent = Color3.fromRGB(160, 180, 220), AccentLight = Color3.fromRGB(80, 210, 255),
+                          MainBg = Color3.fromRGB(8, 9, 20), SidebarBg = Color3.fromRGB(5, 6, 14), ToggleOff = Color3.fromRGB(18, 22, 44) },
 }
-Library.ThemeOrder = { "Rayfield", "Nova Silver", "Silver Surfer", "Power Cosmic", "Zenn-La", "Deep Space" }
+Library.ThemeOrder = { "Cosmic Void", "Nova Pulse", "Nebula Blue", "Solar Flare", "Void Emerald", "Silver Surfer" }
 
 --- Add your own preset: Library:RegisterTheme("Sunset", { Accent = Color3.fromRGB(255,120,40) })
 function Library:RegisterTheme(name, preset)
@@ -568,7 +563,7 @@ function Library:CreateWindow(opts)
     if type(opts.Theme) == "table" then
         preset = opts.Theme; self.ThemeName = opts.Theme.Name or "Custom"
     else
-        self.ThemeName = Library.Themes[opts.Theme or ""] and opts.Theme or "Nova Silver"
+        self.ThemeName = Library.Themes[opts.Theme or ""] and opts.Theme or "Cosmic Void"
         preset = Library.Themes[self.ThemeName]
     end
     self.Theme = BuildTheme(preset)
@@ -3341,18 +3336,18 @@ end
 
 local Window = Scorp:CreateWindow({
     Title        = "SCORP",
-    Subtitle     = "Made By Yuniku",
-    Theme        = "Rayfield",
-    Flat         = true,
-    Starfield    = false,
-    ToggleKey    = Enum.KeyCode.K,
+    Subtitle     = "Deep Space · Made By Yuniku · v0.1",
+    Theme        = "Cosmic Void",
+    ToggleKey    = Enum.KeyCode.RightShift,
     UnloadKey    = Enum.KeyCode.Delete,
     WidgetText   = "SCORP",
     LogoIcon     = "✦",
     ConfigFolder = "Scorp",
+    BackgroundImage = "rbxassetid://0",
+    BackgroundImageTransparency = 0.5,
 })
 
-Window:SetWatermark('<font color="rgb(80,105,255)">Scorp</font>  ·  Made By Yuniku')
+Window:SetWatermark('<font color="rgb(168,186,214)">Scorp</font>  ·  placeholder build')
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Home
