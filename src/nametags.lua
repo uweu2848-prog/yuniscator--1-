@@ -845,117 +845,335 @@ function Nametags.PreviewCard(parent, overrides, role)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
---  HUD button: small "M7" pill in a corner, pops a card with hide/edit tag —
---  "edit tag" opens the standalone in-game editor window (see script.lua /
---  tageditor.lua), never a browser. onEdit is called when that button is pressed.
+--  HUD button — floating SCORP pill + animated action card
+--
+--  CreateHudButton(onEdit, onToggleScript)
+--      onEdit          – called when "Edit Tag" is pressed  (opens tageditor)
+--      onToggleScript  – called when "Open / Close Script" is pressed
+--
+--  The pill is always visible on screen. Clicking it slides open a card
+--  with three quick-action buttons so the user never needs to remember a
+--  keybind just to get the menu back.
 -- ═══════════════════════════════════════════════════════════════════════════
 local hud = nil
-function Nametags.CreateHudButton(onEdit)
+
+function Nametags.CreateHudButton(onEdit, onToggleScript)
     if hud then return end
-    -- Button/click events aren't guaranteed everywhere (e.g. a headless test harness),
-    -- so this never takes the rest of the script down with it.
-    local ok, err = pcall(Nametags._buildHudButton, onEdit)
+    local ok, err = pcall(Nametags._buildHudButton, onEdit, onToggleScript)
     if not ok then warn("[Scorp] couldn't create the nametag HUD button: " .. tostring(err)) end
 end
 
-function Nametags._buildHudButton(onEdit)
+function Nametags._buildHudButton(onEdit, onToggleScript)
+    local TweenService = game:GetService("TweenService")
+    local UIS          = game:GetService("UserInputService")
+
+    -- ── palette (matches the Cosmic Void window theme) ───────────────────
+    local C = {
+        bg        = Color3.fromRGB(10,  8,  20),    -- card / pill background
+        bgHover   = Color3.fromRGB(18, 14, 36),
+        border    = Color3.fromRGB(90,  60, 180),   -- purple stroke
+        accent    = Color3.fromRGB(130, 80, 255),   -- pill text / header
+        btnPri    = Color3.fromRGB(110, 55, 235),   -- primary button (purple)
+        btnSec    = Color3.fromRGB(25,  20, 48),    -- secondary button
+        btnDanger = Color3.fromRGB(180, 45,  55),   -- red "close script"
+        text      = Color3.fromRGB(230, 225, 255),
+        textDim   = Color3.fromRGB(140, 130, 170),
+        divider   = Color3.fromRGB(50,  38,  90),
+    }
+
+    local PILL_W, PILL_H = 72, 30
+    local CARD_W, CARD_H = 230, 148
+    local MARGIN         = 14   -- distance from right / top edge
+
+    -- ── root ScreenGui ───────────────────────────────────────────────────
     local gui = Instance.new("ScreenGui")
-    gui.Name = "ScorpNametagHud"
-    gui.ResetOnSpawn = false
+    gui.Name           = "ScorpHudButton"
+    gui.ResetOnSpawn   = false
     gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 999
-    gui.Parent = (gethui and gethui()) or CoreGui
+    gui.DisplayOrder   = 1000
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent         = (gethui and gethui()) or game:GetService("CoreGui")
 
+    -- ── helpers ──────────────────────────────────────────────────────────
+    local function corner(parent, radius)
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, radius or 10)
+        c.Parent = parent
+        return c
+    end
+    local function stroke(parent, color, thickness, trans)
+        local s = Instance.new("UIStroke")
+        s.Color        = color or C.border
+        s.Thickness    = thickness or 1.2
+        s.Transparency = trans or 0.35
+        s.Parent       = parent
+        return s
+    end
+    local function label(parent, text, size, color, bold, xa, pos, sz)
+        local l = Instance.new("TextLabel")
+        l.BackgroundTransparency = 1
+        l.Font         = bold and Enum.Font.GothamBold or Enum.Font.Gotham
+        l.TextSize     = size or 13
+        l.Text         = text or ""
+        l.TextColor3   = color or C.text
+        l.TextXAlignment = xa or Enum.TextXAlignment.Left
+        if pos then l.Position = pos end
+        if sz  then l.Size     = sz  end
+        l.Parent = parent
+        return l
+    end
+    local function tween(inst, t, props)
+        return TweenService:Create(inst, TweenInfo.new(t, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), props)
+    end
+
+    -- ── pill ─────────────────────────────────────────────────────────────
     local pill = Instance.new("TextButton")
-    pill.Name = "Pill"
-    pill.Size = UDim2.new(0, 44, 0, 28)
-    pill.Position = UDim2.new(1, -60, 0, 12)
-    pill.BackgroundColor3 = Color3.fromRGB(13, 10, 22)
-    pill.Text = "M7"
-    pill.TextColor3 = Color3.fromRGB(168, 130, 255)
-    pill.Font = Enum.Font.GothamBold
-    pill.TextSize = 14
-    pill.AutoButtonColor = false
-    pill.Parent = gui
-    local pillCorner = Instance.new("UICorner"); pillCorner.CornerRadius = UDim.new(0, 8); pillCorner.Parent = pill
-    local pillStroke = Instance.new("UIStroke"); pillStroke.Color = Color3.fromRGB(120, 90, 220); pillStroke.Transparency = 0.5; pillStroke.Parent = pill
+    pill.Name              = "Pill"
+    pill.Size              = UDim2.fromOffset(PILL_W, PILL_H)
+    pill.Position          = UDim2.new(1, -(PILL_W + MARGIN), 0, MARGIN)
+    pill.BackgroundColor3  = C.bg
+    pill.AutoButtonColor   = false
+    pill.Text              = ""
+    pill.ZIndex            = 2
+    pill.Parent            = gui
+    corner(pill, 8)
+    stroke(pill, C.border, 1.2, 0.25)
 
+    -- dot indicator (glows when script window is open — updated externally)
+    local dot = Instance.new("Frame")
+    dot.Size              = UDim2.fromOffset(6, 6)
+    dot.Position          = UDim2.new(0, 10, 0.5, -3)
+    dot.BackgroundColor3  = C.accent
+    dot.BorderSizePixel   = 0
+    dot.ZIndex            = 3
+    dot.Parent            = pill
+    corner(dot, 3)
+
+    local pillLabel = Instance.new("TextLabel")
+    pillLabel.BackgroundTransparency = 1
+    pillLabel.Position   = UDim2.new(0, 22, 0, 0)
+    pillLabel.Size       = UDim2.new(1, -26, 1, 0)
+    pillLabel.Font       = Enum.Font.GothamBold
+    pillLabel.TextSize   = 13
+    pillLabel.Text       = "SCORP"
+    pillLabel.TextColor3 = C.accent
+    pillLabel.TextXAlignment = Enum.TextXAlignment.Center
+    pillLabel.ZIndex     = 3
+    pillLabel.Parent     = pill
+
+    -- ── card (hidden by default, slides down from pill) ──────────────────
     local card = Instance.new("Frame")
-    card.Name = "Card"
-    card.Size = UDim2.new(0, 240, 0, 132)
-    card.Position = UDim2.new(1, -60, 0, 46)
-    card.AnchorPoint = Vector2.new(1, 0)
-    card.BackgroundColor3 = Color3.fromRGB(15, 12, 26)
-    card.Visible = false
-    card.Parent = gui
-    local cardCorner = Instance.new("UICorner"); cardCorner.CornerRadius = UDim.new(0, 12); cardCorner.Parent = card
-    local cardStroke = Instance.new("UIStroke"); cardStroke.Color = Color3.fromRGB(90, 70, 160); cardStroke.Transparency = 0.4; cardStroke.Parent = card
+    card.Name             = "Card"
+    card.Size             = UDim2.fromOffset(CARD_W, CARD_H)
+    card.Position         = UDim2.new(1, -(CARD_W + MARGIN), 0, MARGIN + PILL_H + 6)
+    card.BackgroundColor3 = C.bg
+    card.ClipsDescendants = true
+    card.Visible          = false
+    card.ZIndex           = 4
+    card.Parent           = gui
+    corner(card, 12)
+    stroke(card, C.border, 1.2, 0.3)
 
-    local title = Instance.new("TextLabel")
-    title.BackgroundTransparency = 1
-    title.Position = UDim2.new(0, 16, 0, 12)
-    title.Size = UDim2.new(1, -32, 0, 18)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 13
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.TextColor3 = Color3.fromRGB(168, 130, 255)
-    title.Text = "NAMETAG"
-    title.Parent = card
+    -- card header
+    local hdr = Instance.new("Frame")
+    hdr.Size             = UDim2.new(1, 0, 0, 36)
+    hdr.BackgroundColor3 = Color3.fromRGB(16, 12, 32)
+    hdr.BorderSizePixel  = 0
+    hdr.ZIndex           = 5
+    hdr.Parent           = card
+    corner(hdr, 12)
+    -- square-off the bottom corners of the header bar
+    local hdrSquare = Instance.new("Frame")
+    hdrSquare.Size             = UDim2.new(1, 0, 0, 10)
+    hdrSquare.Position         = UDim2.new(0, 0, 1, -10)
+    hdrSquare.BackgroundColor3 = Color3.fromRGB(16, 12, 32)
+    hdrSquare.BorderSizePixel  = 0
+    hdrSquare.ZIndex           = 5
+    hdrSquare.Parent           = hdr
 
-    local subtitle = Instance.new("TextLabel")
-    subtitle.BackgroundTransparency = 1
-    subtitle.Position = UDim2.new(0, 16, 0, 32)
-    subtitle.Size = UDim2.new(1, -32, 0, 36)
-    subtitle.Font = Enum.Font.Gotham
-    subtitle.TextSize = 12
-    subtitle.TextWrapped = true
-    subtitle.TextXAlignment = Enum.TextXAlignment.Left
-    subtitle.TextColor3 = Color3.fromRGB(180, 180, 195)
-    subtitle.Text = "hide your local tag or open the editor?"
-    subtitle.Parent = card
+    label(hdr, "✦  SCORP", 12, C.accent, true, Enum.TextXAlignment.Left,
+        UDim2.fromOffset(14, 0), UDim2.new(0.6, 0, 1, 0))
+    local hdrSub = label(hdr, "quick actions", 11, C.textDim, false, Enum.TextXAlignment.Right,
+        UDim2.new(0, 0, 0, 0), UDim2.new(1, -14, 1, 0))
+    hdrSub.Position = UDim2.new(0, 14, 0, 0)
+    hdrSub.Size     = UDim2.new(1, -28, 1, 0)
+    hdrSub.TextXAlignment = Enum.TextXAlignment.Right
 
-    local function makeBtn(text, xScale, xOffset, primary)
+    -- divider line
+    local div = Instance.new("Frame")
+    div.Size             = UDim2.new(1, -28, 0, 1)
+    div.Position         = UDim2.new(0, 14, 0, 36)
+    div.BackgroundColor3 = C.divider
+    div.BorderSizePixel  = 0
+    div.ZIndex           = 5
+    div.Parent           = card
+
+    -- ── action buttons ───────────────────────────────────────────────────
+    --  Layout: three equal-width buttons in one row at the bottom of the card
+    local BTN_H  = 34
+    local BTN_Y  = CARD_H - BTN_H - 14
+    local BTN_W  = math.floor((CARD_W - 28 - 8) / 3)   -- 3 cols with 4px gaps
+
+    local function makeBtn(text, col, xpos)
         local b = Instance.new("TextButton")
-        b.Size = UDim2.new(0.5, -20, 0, 32)
-        b.Position = UDim2.new(xScale, xOffset, 1, -44)
-        b.BackgroundColor3 = primary and Color3.fromRGB(124, 58, 237) or Color3.fromRGB(30, 26, 46)
-        b.Text = text
-        b.Font = Enum.Font.GothamMedium
-        b.TextSize = 13
-        b.TextColor3 = Color3.fromRGB(240, 240, 250)
-        b.AutoButtonColor = false
-        b.Parent = card
-        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 8); c.Parent = b
+        b.Size              = UDim2.fromOffset(BTN_W, BTN_H)
+        b.Position          = UDim2.fromOffset(xpos, BTN_Y)
+        b.BackgroundColor3  = col
+        b.Text              = text
+        b.Font              = Enum.Font.GothamMedium
+        b.TextSize          = 11
+        b.TextColor3        = C.text
+        b.AutoButtonColor   = false
+        b.ZIndex            = 6
+        b.Parent            = card
+        corner(b, 8)
+
+        b.MouseEnter:Connect(function()
+            tween(b, 0.15, { BackgroundColor3 = col:Lerp(Color3.new(1,1,1), 0.08) }):Play()
+        end)
+        b.MouseLeave:Connect(function()
+            tween(b, 0.15, { BackgroundColor3 = col }):Play()
+        end)
         return b
     end
 
-    local hideBtn = makeBtn("hide tag", 0, 16, false)
-    local editBtn = makeBtn("edit tag", 0.5, -4, true)
+    local x1 = 14
+    local x2 = x1 + BTN_W + 4
+    local x3 = x2 + BTN_W + 4
 
-    local open = false
-    local function setOpen(v)
-        open = v
-        card.Visible = v
+    local hideBtn   = makeBtn("👁  Tag",         C.btnSec, x1)
+    local editBtn   = makeBtn("🏷  Edit Tag",    C.btnPri, x2)
+    local scriptBtn = makeBtn("≡  Open Script", C.btnSec, x3)
+
+    -- small sub-labels under each button
+    local function subLabel(text, xpos)
+        local l = Instance.new("TextLabel")
+        l.BackgroundTransparency = 1
+        l.Size       = UDim2.fromOffset(BTN_W, 14)
+        l.Position   = UDim2.fromOffset(xpos, BTN_Y + BTN_H + 3)
+        l.Font       = Enum.Font.Gotham
+        l.TextSize   = 10
+        l.Text       = text
+        l.TextColor3 = C.textDim
+        l.TextXAlignment = Enum.TextXAlignment.Center
+        l.ZIndex     = 6
+        l.Parent     = card
+        return l
+    end
+    local hideSubLabel   = subLabel("show/hide",   x1)
+    local editSubLabel   = subLabel("editor",       x2)
+    local scriptSubLabel = subLabel("toggle menu",  x3)
+
+    -- ── card open/close animation ─────────────────────────────────────────
+    local cardOpen   = false
+    local animActive = false
+
+    local function setCard(open)
+        if animActive then return end
+        animActive = true
+        if open then
+            card.Size    = UDim2.fromOffset(CARD_W, 0)
+            card.Visible = true
+            tween(card, 0.22, { Size = UDim2.fromOffset(CARD_W, CARD_H) }):Play()
+            task.delay(0.22, function() animActive = false end)
+        else
+            local t = tween(card, 0.16, { Size = UDim2.fromOffset(CARD_W, 0) })
+            t:Play()
+            t.Completed:Connect(function()
+                card.Visible = false
+                card.Size    = UDim2.fromOffset(CARD_W, CARD_H)
+                animActive   = false
+            end)
+        end
+        cardOpen = open
+
+        -- subtle pill colour change when card is open
+        tween(pill, 0.15, {
+            BackgroundColor3 = open and C.bgHover or C.bg,
+        }):Play()
+        stroke(pill, C.border, 1.2, open and 0.1 or 0.25)
     end
 
-    local function safeClick(btn, fn)
-        local sig = btn and btn.MouseButton1Click
-        if sig and type(sig.Connect) == "function" then sig:Connect(fn) end
-    end
-    safeClick(pill, function() setOpen(not open) end)
-    safeClick(hideBtn, function()
-        S.ShowSelf = not S.ShowSelf
-        hideBtn.Text = S.ShowSelf and "hide tag" or "show tag"
-        render()
-        setOpen(false)
+    -- close card when clicking anywhere outside it
+    UIS.InputBegan:Connect(function(input)
+        if not cardOpen then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+        and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        local pos = input.Position
+        -- check if click is outside both pill and card
+        local function inside(frame)
+            local abs = frame.AbsolutePosition
+            local siz = frame.AbsoluteSize
+            return pos.X >= abs.X and pos.X <= abs.X + siz.X
+               and pos.Y >= abs.Y and pos.Y <= abs.Y + siz.Y
+        end
+        if not inside(pill) and not inside(card) then
+            setCard(false)
+        end
     end)
-    safeClick(editBtn, function()
-        setOpen(false)
-        if onEdit then onEdit() end
+
+    -- ── button state helpers ──────────────────────────────────────────────
+    local tagVisible = true   -- tracks S.ShowSelf so the label stays accurate
+
+    local function updateHideLabel()
+        hideBtn.Text       = tagVisible and "👁  Hide Tag" or "👁  Show Tag"
+        hideSubLabel.Text  = tagVisible and "my tag on"   or "my tag off"
+    end
+    updateHideLabel()
+
+    -- scriptBtn text updated from outside via the toggle callback return value
+    local scriptVisible = true    -- assume script starts visible
+    local function updateScriptLabel(visible)
+        scriptVisible        = visible
+        scriptBtn.Text       = scriptVisible and "≡  Hide Menu" or "≡  Open Menu"
+        scriptSubLabel.Text  = scriptVisible and "menu open"   or "menu closed"
+        -- dim the dot when the window is hidden
+        tween(dot, 0.2, { BackgroundColor3 = scriptVisible and C.accent or C.textDim }):Play()
+    end
+
+    -- ── wire up the three buttons ─────────────────────────────────────────
+    local function safeConnect(btn, fn)
+        if btn and btn.MouseButton1Click then
+            btn.MouseButton1Click:Connect(fn)
+        end
+    end
+
+    safeConnect(pill, function()
+        setCard(not cardOpen)
+    end)
+
+    safeConnect(hideBtn, function()
+        tagVisible  = not tagVisible
+        S.ShowSelf  = tagVisible
+        render()
+        updateHideLabel()
+        setCard(false)
+    end)
+
+    safeConnect(editBtn, function()
+        setCard(false)
+        if onEdit then task.defer(onEdit) end
+    end)
+
+    safeConnect(scriptBtn, function()
+        setCard(false)
+        if onToggleScript then
+            task.defer(function()
+                -- onToggleScript should return the NEW visible state (true = now open)
+                local newState = onToggleScript()
+                if type(newState) == "boolean" then
+                    updateScriptLabel(newState)
+                else
+                    -- if the callback doesn't return state, just flip our local tracking
+                    updateScriptLabel(not scriptVisible)
+                end
+            end)
+        end
     end)
 
     hud = gui
 end
+
 
 function Nametags.Stop()
     if not running and not cfg then return end
