@@ -18,6 +18,8 @@ The configured Discord webhook keeps one editable **Scorp · Live Users** messag
 
 Configured in-game staff can open the staff console to resolve a Roblox username to its account ID, select an active Scorp user in the same Roblox game server, copy their ID, review access lists, and run access actions. Nametag design supports role, displayed text, custom hex/RGB accent colors, a visual picker, and synchronized red/green/blue sliders. Username resolution calls Roblox from the backend and is staff-authenticated; the console's access checks remain server-authoritative.
 
+Scorp nametags emphasize the Roblox `@username` in a brighter, larger line, with the community invite in a smaller footer. Free users can mix curated color, font, and effect presets; staff-entitled premium users get the web studio's individual palette, typography, layout, badge/background, and animation controls. At long range, a tag collapses to the avatar bubble; its small arrow action attempts to move your character next to that Scorp user in the same Roblox server. This is client-side movement and may be blocked or corrected by the game.
+
 Moderation data is stored under `DATA_DIR` (`access.json`, `access-history.json`, `offenses.json`, and `paid-tags.json`). The allowlist only suppresses automatic tamper enforcement; an existing blacklist still blocks the account. Manual and automatic blacklist actions include reasons and are recorded in the moderation history.
 
 Set `ADMIN_ROBLOX_IDS` to a comma-separated list of trusted Roblox user IDs to authorize the in-game staff panel. `OWNER_USER_ID` is also authorized. Discord commands use `STAFF_DISCORD_IDS` when configured; otherwise they require the Discord Administrator permission.

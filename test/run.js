@@ -402,6 +402,8 @@ async function testServer(d) {
         const freeSave = await fetch(`${base}/api/tag-session/${editorCode}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ colorPreset: 'Cyber Blue', fontPreset: 'Sci-Fi', effectPreset: 'Glitch Pop' }) });
         const freeSaved = await freeSave.json();
         ok(freeSave.status === 200 && freeSaved.tag.effective.rankFont === 'Michroma' && freeSaved.tag.effective.glitch === true && freeSaved.tag.effective.accentA === '#3cc8ff', 'self-service editor can save supported free font/color/effect presets');
+        const freeOptions = await (await fetch(`${base}/api/tag-session/${editorCode}`)).json();
+        ok(freeOptions.premium === false && !freeOptions.options.fonts && !freeOptions.options.animations, 'free accounts receive curated presets without the premium option catalog');
         await sleep(2100);
         const presetRoster = await post(base, '/api/nametags/sync', { jobId: 'J1', displayName: 'Bobby' }, bearer(tok.B));
         const bobPreset = (presetRoster.json.users || []).find(u => u.username === 'Bob');
@@ -417,8 +419,15 @@ async function testServer(d) {
         ok(paidTier.status === 200 && paidTierData.tag.tier === 'premium', 'staff can grant a persistent premium-tag entitlement');
         const paidEditorLink = await post(base, '/api/nametags/editor-link', {}, bearer(tok.A));
         const paidCode = paidEditorLink.json.url.split('#')[1];
+        const paidBoot = await (await fetch(`${base}/api/tag-session/${paidCode}`)).json();
+        ok(paidBoot.premium === true && paidBoot.options.fonts.includes('GothamBlack') && paidBoot.options.animations.includes('wave'), 'premium accounts receive expanded fonts and animation controls');
         const paidFreeEdit = await fetch(`${base}/api/tag-session/${paidCode}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ colorPreset: 'Cyber Blue', fontPreset: 'Sci-Fi', effectPreset: 'Glitch Pop' }) });
-        ok(paidFreeEdit.status === 400, 'premium custom tags cannot be overwritten through the free preset editor');
+        ok(paidFreeEdit.status === 400, 'premium edits require the premium option format rather than the free preset form');
+        const paidSave = await fetch(`${base}/api/tag-session/${paidCode}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ options: { label: 'Cosmic Member', nameTextSize: 18, primary: '#aabbcc', glow: 'off', textAnimation: 'shimmer' } }) });
+        const paidSaved = await paidSave.json();
+        ok(paidSave.status === 200 && paidSaved.tag.effective.label === 'Cosmic Member' && paidSaved.tag.effective.nameTextSize === 18 && paidSaved.tag.effective.glow === false, 'premium accounts can save individual text, color, size, and effect settings');
+        const badPaidOption = await fetch(`${base}/api/tag-session/${paidCode}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ options: { unknownPremiumThing: 'on' } }) });
+        ok(badPaidOption.status === 400, 'premium editor rejects unsupported design keys');
         // export / import / preset over HTTP
         const expNone = await fetch(`${tagUrl('8004')}/export`, { headers: admin });
         ok(expNone.status === 400, 'exporting a player with no design is a readable 400');
@@ -528,9 +537,9 @@ async function testLua(d, S) {
     ok(boss && boss.tags.some(t => t.owner === 'Boss' && t.title === 'Owner' && t.accent[0] === 255 && t.accent[1] === 196), 'owner sees their own gold Owner tag');
     const tester = run('basic.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L1', OTHERS: '6002:Drew:Drew,1000:Boss:The Boss', HWID: 'LUA-T' });
     const byOwner = Object.fromEntries((tester?.tags || []).map(t => [t.owner, t]));
-    ok(byOwner.Drew && byOwner.Drew.title === 'Scorp Trial Support' && byOwner.Drew.name === 'Drew · discord.gg/scorp' && byOwner.Drew.accent[2] === 255, 'tag keeps the Roblox name and includes the Discord invite');
-    ok(byOwner.Boss && byOwner.Boss.title === 'Owner' && byOwner.Boss.name === 'The Boss · discord.gg/scorp', 'owner tag keeps display name and adds the invite');
-    ok(byOwner.Tester && byOwner.Tester.title === 'Member' && byOwner.Tester.name === 'Tester · discord.gg/scorp', 'own member tag also includes the Roblox name and invite');
+    ok(byOwner.Drew && byOwner.Drew.title === 'Scorp Trial Support' && byOwner.Drew.name === '@Drew' && byOwner.Drew.nameSize >= 13 && byOwner.Drew.brand === 'discord.gg/scorp' && byOwner.Drew.accent[2] === 255, 'tag emphasizes the Roblox username and retains compact invite branding');
+    ok(byOwner.Boss && byOwner.Boss.title === 'Owner' && byOwner.Boss.name === '@Boss', 'owner tag prioritizes the Roblox username over display name');
+    ok(byOwner.Tester && byOwner.Tester.title === 'Member' && byOwner.Tester.name === '@Tester', 'member tag shows the account username prominently');
     ok(byOwner.Drew && byOwner.Drew.avatar && byOwner.Drew.avatar.startsWith('rbxthumb'), 'avatar headshot replaces the glyph');
 
     // ── custom designs made from Discord / the admin API show up in-game ──
@@ -546,13 +555,13 @@ async function testLua(d, S) {
     const design = run('basic.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L5', OTHERS: '6003:Nova:Nova,6004:Fx:Fx', HWID: 'LUA-T3' });
     const dOwner = Object.fromEntries((design?.tags || []).map(t => [t.owner, t]));
     const nova = dOwner.Nova, fx = dOwner.Fx;
-    ok(nova && nova.title === 'Cosmic Herald' && nova.name === 'Nova · discord.gg/scorp', 'premium title customization retains Roblox identity and invite branding', nova);
+    ok(nova && nova.title === 'Cosmic Herald' && nova.name === '@Nova' && nova.brand === 'discord.gg/scorp', 'premium title customization retains prominent Roblox identity and invite branding', nova);
     ok(nova && nova.avatar === 'rbxassetid://1270554045585765', 'custom logo image replaces the avatar', nova && nova.avatar);
     ok(nova && Math.round(nova.titleColor[0]) === 255 && Math.round(nova.titleColor[1]) === 136 && Math.round(nova.titleColor[2]) === 0, 'custom primary colour #ff8800 colours the label', nova && nova.titleColor);
     ok(nova && nova.titleFont === 'Font.GothamBlack' && nova.titleSize === 18, 'custom rank font + text size apply', nova && [nova.titleFont, nova.titleSize]);
     ok(nova && nova.cardWidth === 168 && nova.cardHeight === 34 && nova.studsOffset === 3.05, 'fixed card size 168x34 and 3.05 stud offset apply', nova && [nova.cardWidth, nova.cardHeight, nova.studsOffset]);
     ok(nova && nova.hasGlow === false, 'glow off removes the glow frame');
-    ok(fx && fx.title === 'FX Test' && fx.name === 'Fx · discord.gg/scorp', 'custom tag text cannot impersonate or replace the Roblox account name', fx);
+    ok(fx && fx.title === 'FX Test' && fx.name === '@Fx', 'custom tag text cannot impersonate or replace the Roblox account name', fx);
     ok(fx && fx.particles === 5 && fx.gridLines === 2 && fx.underline && fx.hasBackground, 'particles, grid, underline sweep and background image are drawn', fx);
     ok(fx && Math.round(fx.accent[0]) === 51 && Math.round(fx.accent[1]) === 170 && Math.round(fx.accent[2]) === 255, 'theme colour #33aaff drives the accent ring', fx && fx.accent);
     ok(design && design.threadErrors === 0 && design.warnings.length === 0, 'every effect runs without Lua errors', design && design.warnings);
@@ -561,7 +570,7 @@ async function testLua(d, S) {
     await sleep(1300);
     const ed = run('editor.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'E1', HWID: 'LUA-ED' });
     ok(ed && ed.threadErrors === 0 && ed.warnings.length === 0, 'free name-tag editor loads and runs its preset controls without Lua errors', ed && ed.warnings);
-    ok(ed && ed.hasPreviewHolder && ed.initial && ed.initial.title === 'Member' && ed.initial.cardHeight === 42, 'live preview draws the default tag before a preset is selected', ed && ed.initial);
+    ok(ed && ed.hasPreviewHolder && ed.initial && ed.initial.title === 'Member' && ed.initial.cardHeight === 50 && ed.initial.name === '@Tester' && ed.initial.nameSize >= 13, 'live preview draws the readable default username tag before a preset is selected', ed && ed.initial);
     ok(ed && !ed.hasImportControl && !ed.hasIndividualColorControl, 'free editor omits design-code import and individual color pickers', ed);
     const rainbowTag = ed && ed.rainbow;
     ok(rainbowTag && rainbowTag.title === 'Member' && rainbowTag.titleFont === 'Font.Michroma' && rainbowTag.hasGlow && rainbowTag.particles === 5, 'font, palette, and rainbow effect presets redraw the preview', rainbowTag);
@@ -586,7 +595,7 @@ async function testLua(d, S) {
     const far = run('basic.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L5', OTHERS: '6003:Nova:Nova', OTHER_DIST: '30', HWID: 'LUA-T5' });
     const nearNova = (near?.tags || []).find(t => t.owner === 'Nova'), farNova = (far?.tags || []).find(t => t.owner === 'Nova');
     ok(nearNova && nearNova.cardWidth === 168 && nearNova.studsOffset === 3.05, 'within distFull the full card is shown', nearNova);
-    ok(farNova && farNova.cardWidth === 40 && farNova.studsOffset === 2.65, 'beyond distMini only the logo (miniSize 40) is shown, at the mini offset', farNova);
+    ok(farNova && farNova.cardWidth === 40 && farNova.studsOffset === 2.65 && farNova.miniClickable && farNova.miniAction && farNova.miniButtonVisible, 'beyond distMini the avatar becomes a clickable bubble with a visible quick-action cue', farNova);
 
     await sleep(300);
     await run('basic.lua', { MY_ID: '6002', MY_NAME: 'Drew', JOB_ID: 'L2', OTHERS: '5001:Tester:Tester,1000:Boss:Boss', HWID: 'LUA-DREW2' });

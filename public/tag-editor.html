@@ -107,10 +107,39 @@
     </div>
   </div>
 
+  <div class="card premium-card" id="premiumEditor" style="display:none;">
+    <span class="premium-badge">Premium customization</span>
+    <h2 class="tier-title">Your tag, your style</h2>
+    <p class="tier-intro">Customize the role text, accent, typography, layout, logo, and each effect. Your Roblox username remains visible on the tag.</p>
+    <div class="grid">
+      <div class="field"><label for="premiumLabel">Role text</label><input id="premiumLabel" type="text" maxlength="24" placeholder="e.g. Cosmic Guide"></div>
+      <div class="field"><label for="premiumPrefix">Name prefix (optional)</label><input id="premiumPrefix" type="text" maxlength="24" placeholder="e.g. ✦"></div>
+      <div class="field"><label for="premiumColor">Accent color</label><input id="premiumColor" type="color" value="#55bfff"></div>
+      <div class="field"><label for="premiumRoleColor">Role text color</label><input id="premiumRoleColor" type="color" value="#ffffff"></div>
+      <div class="field"><label for="premiumNameColor">Username color</label><input id="premiumNameColor" type="color" value="#f1f5ff"></div>
+      <div class="field"><label for="premiumCardColor">Card tint</label><input id="premiumCardColor" type="color" value="#111827"></div>
+      <div class="field"><label for="premiumRankFont">Role font</label><select id="premiumRankFont"></select></div>
+      <div class="field"><label for="premiumUserFont">Username font</label><select id="premiumUserFont"></select></div>
+      <div class="field"><label for="premiumTextSize">Role size</label><input id="premiumTextSize" type="number" min="8" max="28" step="1"></div>
+      <div class="field"><label for="premiumNameSize">Username size</label><input id="premiumNameSize" type="number" min="11" max="20" step="1"></div>
+      <div class="field"><label for="premiumMiniSize">Distant bubble size</label><input id="premiumMiniSize" type="number" min="16" max="90" step="1"></div>
+      <div class="field"><label for="premiumImage">Custom badge image asset ID (optional)</label><input id="premiumImage" type="text" placeholder="digits or rbxassetid://…"></div>
+      <div class="field"><label for="premiumBackground">Card background image asset ID (optional)</label><input id="premiumBackground" type="text" placeholder="digits or rbxassetid://…"></div>
+      <div class="field"><label for="premiumWidth">Card width (0 = auto)</label><input id="premiumWidth" type="number" min="0" max="400" step="1"></div>
+      <div class="field"><label for="premiumHeight">Card height</label><input id="premiumHeight" type="number" min="24" max="90" step="1"></div>
+      <div class="field"><label for="premiumAnimation">Role animation</label><select id="premiumAnimation"></select></div>
+    </div>
+    <div class="grid" id="premiumEffects" style="margin-top:14px;"></div>
+    <div class="actions">
+      <button class="btn btn-primary" id="savePremium">Save Premium Design</button>
+      <button class="btn btn-ghost" id="resetPremium">Reset Design</button>
+    </div>
+  </div>
+
   <div class="card premium-card" id="premiumInfo">
-    <span class="premium-badge">Planned · Paid Tier</span>
-    <h2 class="tier-title">Want more control?</h2>
-    <p class="tier-intro" style="margin-bottom:0;">Premium name tags are planned to add custom colors, expanded font choices, image and layout options, and individual effect tuning. Your free presets will remain available.</p>
+    <span class="premium-badge">More styles, still free</span>
+    <h2 class="tier-title">Free presets stay yours</h2>
+    <p class="tier-intro" style="margin-bottom:0;">Pick from curated palettes, font pairs, and effect packs. Premium design controls are available to accounts whose premium tag access has been granted by Scorp staff.</p>
   </div>
 </div>
 
@@ -141,6 +170,8 @@
   let OPTIONS = null;
   let tag = null;
   let baseTag = {};
+  let accountUsername = 'Username';
+  let premiumDraft = {};
   let selections = { colorPreset: 'Silver Surfer', fontPreset: 'Classic', effectPreset: 'Classic Glow' };
 
   function fillSelect(id, values, selected){
@@ -175,6 +206,75 @@
     fillSelect('effectPreset', OPTIONS.freeEffectPresetOrder, selections.effectPreset);
   }
 
+  const premiumEffectKeys = ['glow','pulse','spin','particles','underlineSweep','glitch','grid','logoMotion','effects'];
+  const premiumEffectLabels = { glow:'Glow', pulse:'Pulse', spin:'Animated border', particles:'Particles', underlineSweep:'Title sweep', glitch:'Glitch', grid:'Grid', logoMotion:'Floating badge', effects:'Enable effects' };
+  function loadPremiumEditor(){
+    const current = tag.effective || {};
+    premiumDraft = Object.assign({}, current);
+    fillSelect('premiumRankFont', OPTIONS.fonts, current.rankFont || 'GothamBold');
+    fillSelect('premiumUserFont', OPTIONS.fonts, current.userFont || 'GothamMedium');
+    fillSelect('premiumAnimation', OPTIONS.animations, current.textAnimation || 'default');
+    document.getElementById('premiumLabel').value = current.label || '';
+    document.getElementById('premiumPrefix').value = current.userText && !['auto','none'].includes(current.userText) ? current.userText : '';
+    document.getElementById('premiumColor').value = current.accentA || '#55bfff';
+    document.getElementById('premiumRoleColor').value = current.primary || '#ffffff';
+    document.getElementById('premiumNameColor').value = current.nameColor || '#f1f5ff';
+    document.getElementById('premiumCardColor').value = current.backgroundColorA || '#111827';
+    document.getElementById('premiumTextSize').value = current.textSize || 15;
+    document.getElementById('premiumNameSize').value = current.nameTextSize || 13;
+    document.getElementById('premiumMiniSize').value = current.miniSize || 40;
+    document.getElementById('premiumImage').value = (current.image || '').replace('rbxassetid://','');
+    document.getElementById('premiumBackground').value = (current.background || '').replace('rbxassetid://','');
+    document.getElementById('premiumWidth').value = current.fullWidth || 0;
+    document.getElementById('premiumHeight').value = current.fullHeight || 50;
+    const effects = document.getElementById('premiumEffects');
+    effects.innerHTML = '';
+    premiumEffectKeys.forEach(key => {
+      const field = document.createElement('label');
+      field.className = 'field bool';
+      const text = document.createElement('span');
+      text.textContent = premiumEffectLabels[key];
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = 'premium-' + key;
+      input.checked = !!current[key];
+      input.addEventListener('change', () => { premiumDraft[key] = input.checked; recomputePreview(); setStatus('unsaved changes'); });
+      field.append(text, input);
+      effects.appendChild(field);
+    });
+    ['premiumLabel','premiumPrefix','premiumColor','premiumRoleColor','premiumNameColor','premiumCardColor','premiumRankFont','premiumUserFont','premiumTextSize','premiumNameSize','premiumMiniSize','premiumImage','premiumBackground','premiumWidth','premiumHeight','premiumAnimation'].forEach(id => {
+      const input = document.getElementById(id);
+      input.addEventListener('input', updatePremiumDraft);
+      input.addEventListener('change', updatePremiumDraft);
+    });
+    updatePremiumDraft();
+  }
+
+  function updatePremiumDraft(){
+    if (!tag || tag.tier !== 'premium') return;
+    premiumDraft = Object.assign({}, tag.effective, {
+      label: document.getElementById('premiumLabel').value,
+      userText: document.getElementById('premiumPrefix').value || 'auto',
+      accentA: document.getElementById('premiumColor').value,
+      primary: document.getElementById('premiumRoleColor').value,
+      nameColor: document.getElementById('premiumNameColor').value,
+      backgroundColorA: document.getElementById('premiumCardColor').value,
+      rankFont: document.getElementById('premiumRankFont').value,
+      userFont: document.getElementById('premiumUserFont').value,
+      textSize: Number(document.getElementById('premiumTextSize').value),
+      nameTextSize: Number(document.getElementById('premiumNameSize').value),
+      miniSize: Number(document.getElementById('premiumMiniSize').value),
+      image: document.getElementById('premiumImage').value.trim(),
+      background: document.getElementById('premiumBackground').value.trim(),
+      fullWidth: Number(document.getElementById('premiumWidth').value),
+      fullHeight: Number(document.getElementById('premiumHeight').value),
+      textAnimation: document.getElementById('premiumAnimation').value,
+    });
+    premiumEffectKeys.forEach(key => { premiumDraft[key] = document.getElementById('premium-' + key).checked; });
+    recomputePreview();
+    setStatus('unsaved changes');
+  }
+
   function boot(){
     gate.style.display = 'none';
     app.style.display = 'block';
@@ -184,25 +284,28 @@
       tag = d.tag;
       baseTag = Object.assign({}, OPTIONS.defaults, OPTIONS.rolePresets[tag.role] || {}, { label: tag.roleLabel });
       document.getElementById('whoami').textContent = d.username + ' · ' + d.tag.roleLabel;
+      accountUsername = d.username || 'Username';
       if (tag.tier === 'premium') {
         document.getElementById('freeEditor').style.display = 'none';
-        document.querySelector('#premiumInfo .premium-badge').textContent = 'Premium Tag Active';
-        document.querySelector('#premiumInfo .tier-title').textContent = 'Your custom tag is staff-managed';
-        document.querySelector('#premiumInfo .tier-intro').textContent = 'This account has a premium nametag. Contact Scorp staff in Discord for approved design changes; the free preset editor cannot overwrite it.';
-      }
-      loadSelections();
+        document.getElementById('premiumInfo').style.display = 'none';
+        document.getElementById('premiumEditor').style.display = 'block';
+        loadPremiumEditor();
+      } else loadSelections();
       recomputePreview();
       setStatus('all changes saved', 'ok');
     }).catch(e => setStatus(e.message, 'err'));
   }
 
   function recomputePreview(){
-    const effective = Object.assign({}, baseTag,
-      OPTIONS.colorPresetValues[selections.colorPreset],
-      OPTIONS.freeFontPresets[selections.fontPreset],
-      OPTIONS.freeEffectPresets[selections.effectPreset]);
+    const effective = tag && tag.tier === 'premium'
+      ? Object.assign({}, tag.effective, premiumDraft)
+      : Object.assign({}, baseTag,
+        OPTIONS.colorPresetValues[selections.colorPreset],
+        OPTIONS.freeFontPresets[selections.fontPreset],
+        OPTIONS.freeEffectPresets[selections.effectPreset]);
     document.getElementById('previewRank').textContent = effective.label || 'Member';
-    document.getElementById('previewUser').textContent = document.getElementById('whoami').textContent.split(' · ')[0] + ' · discord.gg/scorp';
+    const prefix = effective.userText && !['auto','none'].includes(effective.userText) ? ' · ' + effective.userText : '';
+    document.getElementById('previewUser').textContent = '@' + accountUsername + prefix;
     const tagEl = document.getElementById('previewTag');
     tagEl.style.background = `linear-gradient(180deg, ${effective.backgroundColorA}, ${effective.backgroundColorC})`;
     tagEl.style.borderColor = effective.outlineColorA;
@@ -213,6 +316,8 @@
     const fontMap = { Arcade: 'monospace', Code: 'monospace', Michroma: 'Arial, sans-serif', RobotoMono: 'monospace', FredokaOne: 'Trebuchet MS, sans-serif', Nunito: 'Arial, sans-serif', Kalam: 'Comic Sans MS, cursive', PatrickHand: 'Comic Sans MS, cursive', Creepster: 'Impact, fantasy' };
     rank.style.fontFamily = fontMap[effective.rankFont] || 'Segoe UI, sans-serif';
     document.getElementById('previewUser').style.color = effective.nameColor;
+    document.getElementById('previewUser').style.fontSize = Math.max(13, Number(effective.nameTextSize || 13)) + 'px';
+    document.getElementById('previewUser').style.fontFamily = fontMap[effective.userFont] || 'Segoe UI, sans-serif';
     const img = document.getElementById('previewImg');
     img.style.display = effective.image ? 'block' : 'none';
     if (effective.image) img.src = 'https://www.roblox.com/asset-thumbnail/image?assetId=' + effective.image.replace('rbxassetid://','') + '&width=60&height=60&format=png';
@@ -237,6 +342,40 @@
     setStatus('saving…');
     api('', { method: 'PUT', body: selections })
       .then(d => { tag = d.tag; setStatus('free presets saved', 'ok'); })
+      .catch(e => setStatus(e.message, 'err'));
+  };
+
+  document.getElementById('savePremium').onclick = () => {
+    updatePremiumDraft();
+    const options = {
+      theme: premiumDraft.accentA,
+      label: premiumDraft.label || 'default',
+      userText: premiumDraft.userText,
+      primary: premiumDraft.primary,
+      nameColor: premiumDraft.nameColor,
+      backgroundColorA: premiumDraft.backgroundColorA,
+      rankFont: premiumDraft.rankFont,
+      userFont: premiumDraft.userFont,
+      textSize: premiumDraft.textSize,
+      nameTextSize: premiumDraft.nameTextSize,
+      miniSize: premiumDraft.miniSize,
+      image: premiumDraft.image,
+      background: premiumDraft.background,
+      fullWidth: premiumDraft.fullWidth,
+      fullHeight: premiumDraft.fullHeight,
+      textAnimation: premiumDraft.textAnimation,
+    };
+    premiumEffectKeys.forEach(key => { options[key] = premiumDraft[key]; });
+    setStatus('saving premium design…');
+    api('', { method: 'PUT', body: { options } })
+      .then(d => { tag = d.tag; premiumDraft = Object.assign({}, tag.effective); loadPremiumEditor(); recomputePreview(); setStatus('premium design saved', 'ok'); })
+      .catch(e => setStatus(e.message, 'err'));
+  };
+
+  document.getElementById('resetPremium').onclick = () => {
+    if (!confirm('Reset your premium design to your assigned role defaults?')) return;
+    api('', { method: 'DELETE' })
+      .then(d => { tag = d.tag; loadPremiumEditor(); recomputePreview(); setStatus('premium design reset', 'ok'); })
       .catch(e => setStatus(e.message, 'err'));
   };
 

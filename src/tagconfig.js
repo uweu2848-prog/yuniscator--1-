@@ -39,6 +39,8 @@ const FONTS = [
 const FREE_FONT_PRESETS = {
     'Classic': { rankFont: 'GothamBold', userFont: 'Gotham' },
     'Bold': { rankFont: 'GothamBlack', userFont: 'GothamMedium' },
+    'Clean': { rankFont: 'GothamBold', userFont: 'GothamMedium' },
+    'Compact': { rankFont: 'GothamMedium', userFont: 'RobotoCondensed' },
     'Arcade': { rankFont: 'Arcade', userFont: 'Code' },
     'Sci-Fi': { rankFont: 'Michroma', userFont: 'RobotoMono' },
     'Playful': { rankFont: 'FredokaOne', userFont: 'Nunito' },
@@ -73,6 +75,9 @@ const FREE_EFFECT_PRESETS = {
     'Glitch Pop': { textAnimation: 'shimmer', effects: true, glow: true, pulse: false, spin: true, particles: false, underlineSweep: true, glitch: true, grid: true, logoMotion: false },
     'Cosmic Spark': { textAnimation: 'wave', effects: true, glow: true, pulse: true, spin: true, particles: true, underlineSweep: true, glitch: false, grid: true, logoMotion: true },
     'Low-Key': { textAnimation: 'default', effects: false, glow: false, pulse: false, spin: false, particles: false, underlineSweep: false, glitch: false, grid: false, logoMotion: false },
+    'Soft Aurora': { textAnimation: 'shimmer', effects: true, glow: true, pulse: true, spin: false, particles: true, underlineSweep: true, glitch: false, grid: false, logoMotion: true },
+    'Solar Pulse': { textAnimation: 'wave', effects: true, glow: true, pulse: true, spin: true, particles: false, underlineSweep: true, glitch: false, grid: true, logoMotion: false },
+    'Pixel Trail': { textAnimation: 'shimmer', effects: true, glow: false, pulse: false, spin: true, particles: true, underlineSweep: false, glitch: true, grid: true, logoMotion: false },
 };
 const FREE_EFFECT_PRESET_ORDER = Object.keys(FREE_EFFECT_PRESETS);
 
@@ -100,7 +105,7 @@ function paletteFromAccent(accent) {
         accentB: light,
         accentC: lerpHex(accent, WHITE, 0.7),
         highlightColor: WHITE,
-        nameColor: '#96a4be',
+        nameColor: '#f1f5ff',
         textStrokeColor: accent,
         borderColor: lerpHex(accent, BLACK, 0.35),
         outlineColorA: accent,
@@ -129,13 +134,14 @@ const DEFAULTS = Object.freeze({
     label: '',              // '' = use the role's label
     userText: 'auto',       // auto = no prefix; paid designs may add a prefix, but never replace the Roblox name
     rankFont: 'GothamBold',
-    userFont: 'Gotham',
+    userFont: 'GothamMedium',
     textSize: 15,
+    nameTextSize: 13,
     // layout
     image: '',              // rbxassetid://… logo; '' = the player's avatar headshot
     background: '',         // rbxassetid://… card background image; '' = none
     fullWidth: 0,           // 0 = fit to the text
-    fullHeight: 42,
+    fullHeight: 50,
     miniSize: 40,
     offsetFull: 2.9,        // studs above the head
     offsetMini: 2.6,
@@ -176,6 +182,10 @@ const COLOR_PRESET_DEFS = {
     'Gold Royal': { accent: '#ffc440', extra: { outlineColorB: '#ff9640', outlineColorC: '#fff0b3' } },
     'Toxic': { accent: '#b6ff00', extra: { glitchColor: '#00ff9d', particleColorB: '#00ff9d' } },
     'Candy': { accent: '#ff6ed6', extra: { accentC: '#6ecbff', outlineColorB: '#6ecbff', glowColorB: '#6ecbff' } },
+    'Aurora': { accent: '#55f2c3', extra: { accentB: '#93a8ff', outlineColorB: '#9a72ff', glowColorB: '#9a72ff', particleColorA: '#a8fff0' } },
+    'Rose Gold': { accent: '#ef9d9b', extra: { accentB: '#ffd2a8', outlineColorB: '#ffc2c7', glowColorB: '#ffc2c7' } },
+    'Arctic': { accent: '#a6efff', extra: { primary: '#f4fcff', accentB: '#c3d5ff', outlineColorB: '#8ccaff', glowColorB: '#8ccaff' } },
+    'Violet Dream': { accent: '#aa7bff', extra: { accentB: '#ec91ff', outlineColorB: '#64cfff', glowColorB: '#64cfff' } },
     'Inferno': { accent: '#ff4d2e', extra: { outlineColorB: '#ffb02e', glowColorB: '#ffb02e', backgroundColorA: '#1c0a08' } },
     'Ocean': { accent: '#2ee6c8', extra: { outlineColorB: '#3c9bff', glowColorB: '#3c9bff' } },
     'Clean Light': {
@@ -206,7 +216,7 @@ for (const n of PRESET_NAMES) {
 
 // ── Option catalogue (drives validation, autocomplete and the embed) ────────
 const GROUPS = {
-    text: ['label', 'userText', 'rankFont', 'userFont', 'textSize'],
+    text: ['label', 'userText', 'rankFont', 'userFont', 'textSize', 'nameTextSize'],
     layout: ['image', 'background', 'fullWidth', 'fullHeight', 'miniSize', 'offsetFull', 'offsetMini', 'distFull', 'distMini', 'distMax'],
     colors: COLOR_KEYS,
     effects: ['textAnimation', ...EFFECT_KEYS],
@@ -215,14 +225,14 @@ const TYPES = {};
 for (const k of COLOR_KEYS) TYPES[k] = 'color';
 for (const k of EFFECT_KEYS) TYPES[k] = 'bool';
 Object.assign(TYPES, {
-    label: 'text', userText: 'text', rankFont: 'font', userFont: 'font', textSize: 'int',
+    label: 'text', userText: 'text', rankFont: 'font', userFont: 'font', textSize: 'int', nameTextSize: 'int',
     image: 'asset', background: 'asset',
     fullWidth: 'int', fullHeight: 'int', miniSize: 'int',
     offsetFull: 'float', offsetMini: 'float', distFull: 'float', distMini: 'float', distMax: 'float',
     textAnimation: 'enum',
 });
 const RANGES = {
-    textSize: [8, 28], fullWidth: [0, 400], fullHeight: [24, 90], miniSize: [16, 90],
+    textSize: [8, 28], nameTextSize: [11, 20], fullWidth: [0, 400], fullHeight: [24, 90], miniSize: [16, 90],
     offsetFull: [-5, 15], offsetMini: [-5, 15], distFull: [1, 100000], distMini: [1, 100000], distMax: [1, 100000],
 };
 // "Composite" names accepted by /tag set (they expand into several stored keys).

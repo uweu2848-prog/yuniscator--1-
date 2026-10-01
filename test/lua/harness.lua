@@ -385,11 +385,19 @@ local function summarize(g)
     local avatar = H.find(g, "Avatar")
     local titleLabel = H.find(g, "Title")
     local nameLabel = H.find(g, "Name")
+    local brandLabel = H.find(g, "Brand")
+    local miniButton = H.find(g, "MiniPlayerButton")
+    local miniAction = H.find(g, "MiniAction")
     if not titleLabel then return nil end
     return {
         owner = g.Adornee and g.Adornee.Parent and g.Adornee.Parent.Name,
         title = titleLabel.Text,
         name = nameLabel and nameLabel.Text or nil,
+        nameSize = nameLabel and nameLabel.TextSize or nil,
+        brand = brandLabel and brandLabel.Text or nil,
+        miniClickable = miniButton ~= nil,
+        miniAction = miniAction ~= nil,
+        miniButtonVisible = miniButton and miniButton.Visible or false,
         glyph = glyph and glyph.Text,
         glyphVisible = glyph and glyph.Visible ~= false,
         avatar = avatar and avatar.Visible and avatar.Image or nil,

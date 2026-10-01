@@ -132,8 +132,8 @@ function TagEditor.Build(Window, Nametags)
     end
 
     do
-        local sec = tab:CreateSection("Premium Name Tags · Planned", false)
-        sec:AddLabel("A future paid tier is planned for deeper customization, such as custom colors, expanded font choices, images, layout controls, and individual effect tuning. The free preset packs will remain available.", { Wrap = true, Color = Window.Theme.TextDim })
+        local sec = tab:CreateSection("More free styles", false)
+        sec:AddLabel("Free tags include curated color, font, and effect packs. Premium accounts can edit individual design options in the web studio; free preset choices remain available to everyone.", { Wrap = true, Color = Window.Theme.TextDim })
     end
 
     do

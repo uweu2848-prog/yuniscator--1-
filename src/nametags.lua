@@ -414,13 +414,13 @@ local function buildTag(userId, info, head, previewParent)
     local title = tostring(T.label)
     -- Always identify the Roblox account and include the community invite. An
     -- approved paid-tag prefix may appear before it, but cannot replace it.
-    local accountName = tostring(info.displayName or info.username or "")
-    if accountName == "" then accountName = tostring(info.username or "Player") end
+    local accountName = tostring(info.username or "")
+    if accountName == "" then accountName = tostring(info.displayName or "Player") end
     local prefix = T.userText
-    local name = (prefix and prefix ~= "auto" and prefix ~= "none" and prefix ~= "") and (tostring(prefix) .. " · " .. accountName) or accountName
-    name = name .. " · discord.gg/scorp"
+    local name = "@" .. accountName
+    if prefix and prefix ~= "auto" and prefix ~= "none" and prefix ~= "" then name = name .. " · " .. tostring(prefix) end
 
-    local textW = math.max(textWidth(title, T.textSize, rankFont), textWidth(name, 10, userFont))
+    local textW = math.max(textWidth(title, T.textSize, rankFont), textWidth(name, T.nameTextSize, userFont), textWidth("discord.gg/scorp", 8, Enum.Font.Gotham))
     local badgeSize = T.miniSize > 0 and math.min(T.miniSize, T.fullHeight - 12) or 30
     local pad, gap = 10, 9
     local cardW = T.fullWidth > 0 and T.fullWidth or math.clamp(pad + badgeSize + gap + textW + pad + 4, 120, 300)
@@ -446,7 +446,7 @@ local function buildTag(userId, info, head, previewParent)
             AlwaysOnTop = S.AlwaysOnTop,
             MaxDistance = math.min(S.MaxDistance, T.distMax),
             LightInfluence = 0,
-            Active = false,
+            Active = true,
         })
     end
     local scaleObj = make("UIScale", { Scale = 1 }, gui)
@@ -561,6 +561,46 @@ local function buildTag(userId, info, head, previewParent)
         Visible = false,
     }, badge)
     make("UICorner", { CornerRadius = UDim.new(1, 0) }, avatar)
+    local miniButton = make("TextButton", {
+        Name = "MiniPlayerButton",
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, 2, 1, 2),
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        Text = "",
+        AutoButtonColor = false,
+        Visible = false,
+        ZIndex = 6,
+    }, badge)
+    local actionPip = make("TextLabel", {
+        Name = "MiniAction",
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, 2, 1, 2),
+        Size = UDim2.fromOffset(15, 15),
+        BackgroundColor3 = toColor3(T.accentA),
+        Text = "↗",
+        TextColor3 = WHITE,
+        TextSize = 10,
+        Font = Enum.Font.GothamBlack,
+        ZIndex = 7,
+    }, badge)
+    make("UICorner", { CornerRadius = UDim.new(1, 0) }, actionPip)
+    local function teleportToScorpPlayer()
+        local target = Players:GetPlayerByUserId(userId)
+        local targetRoot = target and target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+        local myCharacter = LocalPlayer.Character
+        local myRoot = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
+        if not targetRoot or not myRoot then
+            if cfg and cfg.notify then cfg.notify("Scorp Player", "Couldn't find both characters right now.", 3) end
+            return
+        end
+        local ok = pcall(function() myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 4) end)
+        if cfg and cfg.notify then
+            cfg.notify("Scorp Player", ok and ("Moved near @" .. tostring(info.username or info.displayName or "player")) or "Couldn't move to that player.", 3)
+        end
+    end
+    if miniButton.Activated then miniButton.Activated:Connect(teleportToScorpPlayer)
+    elseif miniButton.MouseButton1Click then miniButton.MouseButton1Click:Connect(teleportToScorpPlayer) end
     if T.image ~= "" then
         avatar.Image = T.image
         avatar.Visible = true
@@ -595,17 +635,34 @@ local function buildTag(userId, info, head, previewParent)
     if T.effects then applyTextAnimation(titleLabel, T.textAnimation, primary) end
     if T.effects and T.glitch then addGlitch(titleLabel, toColor3(T.glitchColor)) end
 
-    local nameLabel = nil
+    local nameLabel, brandLabel = nil, nil
     if name ~= "" then
         nameLabel = make("TextLabel", {
             Name = "Name",
             Position = UDim2.fromOffset(textLeft, 23),
-            Size = UDim2.new(1, -(textLeft + pad), 0, 14),
+            Size = UDim2.new(1, -(textLeft + pad), 0, 17),
             BackgroundTransparency = 1,
             Text = name,
-            TextSize = 10,
+            TextSize = T.nameTextSize,
             Font = userFont,
             TextColor3 = toColor3(T.nameColor),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, card)
+        make("UIStroke", {
+            Thickness = 1, Color = toColor3(T.backgroundColorC), Transparency = 0.35,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+        }, nameLabel)
+        brandLabel = make("TextLabel", {
+            Name = "Brand",
+            Position = UDim2.fromOffset(textLeft, 40),
+            Size = UDim2.new(1, -(textLeft + pad), 0, 9),
+            BackgroundTransparency = 1,
+            Text = "discord.gg/scorp",
+            TextSize = 8,
+            Font = Enum.Font.GothamMedium,
+            TextColor3 = toColor3(T.nameColor),
+            TextTransparency = 0.15,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
         }, card)
@@ -618,7 +675,7 @@ local function buildTag(userId, info, head, previewParent)
     gui.Parent = previewParent or getHolder()
     return gui, tween, {
         T = T, gui = gui, scale = scaleObj, card = card, corner = cardCorner, glow = glowFrame, badge = badge,
-        title = titleLabel, nameLabel = nameLabel, underline = underline, logoTween = logoTween,
+        title = titleLabel, nameLabel = nameLabel, brandLabel = brandLabel, miniButton = miniButton, underline = underline, logoTween = logoTween,
         cardW = cardW, cardH = cardH, badgeSize = badgeSize, pad = pad,
     }
 end
@@ -665,6 +722,8 @@ local function updateLOD(t)
     if P.glow then P.glow.Size = UDim2.fromOffset(w + 6, h + 6) end
     P.title.Visible = not mini
     if P.nameLabel then P.nameLabel.Visible = not mini end
+    if P.brandLabel then P.brandLabel.Visible = not mini end
+    if P.miniButton then P.miniButton.Visible = mini end
     if P.underline then P.underline.Visible = not mini end
     if mini then
         P.badge.AnchorPoint = Vector2.new(0.5, 0.5)

@@ -1193,36 +1193,59 @@ app.post('/api/nametags/editor-link', editorLinkLimiter, requireToken, (req, res
 app.get('/tag', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'tag-editor.html')));
 
 app.get('/api/tag-session/:code', requireEditorCode, (req, res) => {
+    const premium = !!(paidTags[req.editorUserId] && paidTags[req.editorUserId].enabled);
     res.json({
         ok: true,
         username: req.editorUsername,
+        premium,
         options: {
             defaults: tagconfig.DEFAULTS, rolePresets: tagconfig.ROLE_PRESETS, colorKeys: tagconfig.COLOR_KEYS,
             colorPresets: tagconfig.PRESET_NAMES, colorPresetValues: tagconfig.COLOR_PRESETS,
             freeFontPresets: tagconfig.FREE_FONT_PRESETS, freeFontPresetOrder: tagconfig.FREE_FONT_PRESET_ORDER,
             freeEffectPresets: tagconfig.FREE_EFFECT_PRESETS, freeEffectPresetOrder: tagconfig.FREE_EFFECT_PRESET_ORDER,
+            ...(premium ? { fonts: tagconfig.FONTS, animations: tagconfig.ANIMATIONS, groups: tagconfig.GROUPS } : {}),
         },
         tag: tagInfo(req.editorUserId),
     });
 });
 app.put('/api/tag-session/:code', requireEditorCode, (req, res) => {
-    try { res.json({ ok: true, tag: applyFreeTagPresets(req.editorUserId, req.body) }); }
+    try {
+        if (paidTags[req.editorUserId] && paidTags[req.editorUserId].enabled) {
+            const options = (req.body || {}).options;
+            if (!options || typeof options !== 'object' || Array.isArray(options)) throw new tagconfig.TagError('Choose at least one premium tag option.');
+            const premiumKeys = new Set([
+                ...tagconfig.GROUPS.text,
+                ...tagconfig.GROUPS.colors,
+                ...tagconfig.GROUPS.effects,
+                ...tagconfig.GROUPS.layout,
+                'theme',
+            ]);
+            const unsupported = Object.keys(options).find(key => !premiumKeys.has(key));
+            if (unsupported) throw new tagconfig.TagError(`That option isn't available in premium tag editing: ${unsupported}.`);
+            res.json({ ok: true, tag: setTagOptions(req.editorUserId, options) });
+        } else {
+            res.json({ ok: true, tag: applyFreeTagPresets(req.editorUserId, req.body) });
+        }
+    }
     catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 app.delete('/api/tag-session/:code', requireEditorCode, (req, res) => {
     try {
-        if (paidTags[req.editorUserId] && paidTags[req.editorUserId].enabled) throw new tagconfig.TagError('This account has a staff-managed premium tag. Contact Scorp staff for changes.');
         res.json({ ok: true, tag: resetTag(req.editorUserId, req.query.option ? String(req.query.option) : undefined) });
     }
     catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 app.post('/api/tag-session/:code/preset', requireEditorCode, (req, res) => {
     try {
-        res.json({ ok: true, tag: applyFreeTagPresets(req.editorUserId, {
-            colorPreset: (req.body || {}).name,
-            fontPreset: 'Classic',
-            effectPreset: 'Classic Glow',
-        }) });
+        if (paidTags[req.editorUserId] && paidTags[req.editorUserId].enabled) {
+            res.json({ ok: true, tag: applyPreset(req.editorUserId, (req.body || {}).name) });
+        } else {
+            res.json({ ok: true, tag: applyFreeTagPresets(req.editorUserId, {
+                colorPreset: (req.body || {}).name,
+                fontPreset: 'Classic',
+                effectPreset: 'Classic Glow',
+            }) });
+        }
     }
     catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
