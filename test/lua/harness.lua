@@ -62,6 +62,7 @@ function H.advance(seconds)
 end
 task = {
     spawn = function(fn, ...) return spawn(fn, ...) end,
+    defer = function(fn, ...) return spawn(fn, ...) end,
     wait = function(n) coroutine.yield({ wait = n or 0.03 }) return n end,
     delay = function(n, fn) spawn(function() task.wait(n) fn() end) end,
 }
@@ -133,6 +134,17 @@ function methods.Destroy(self)
     for _, c in ipairs({ table.unpack(self._children) }) do c:Destroy() end
 end
 function methods.GetChildren(self) return { table.unpack(self._children) } end
+function methods.GetDescendants(self)
+    local out = {}
+    local function add(parent)
+        for _, child in ipairs(parent._children) do
+            out[#out + 1] = child
+            add(child)
+        end
+    end
+    add(self)
+    return out
+end
 function methods.FindFirstChild(self, name)
     for _, c in ipairs(self._children) do if c.Name == name then return c end end
     return nil
@@ -175,6 +187,10 @@ end
 workspace = { CurrentCamera = { CFrame = { Position = Vector3.new(0, 0, 0) } } }
 
 local coreGui = newInstance("CoreGui") coreGui.Name = "CoreGui"
+if TAMPER == "nested_spy" then
+    local folder = newInstance("Folder") folder.Name = "WorkspaceWidgets" folder.Parent = coreGui
+    local spy = newInstance("ScreenGui") spy.Name = "SimpleSpy" spy.Parent = folder
+end
 local hui = newInstance("ScreenGui") hui.Name = "hui"
 
 local services = {
@@ -306,10 +322,16 @@ local Section = setmetatable({}, { __index = function(_, k)
     end
 end })
 local Tab = { CreateSection = function() return Section end }
+function Tab:Show() H.popoutShown = true end
+function Tab:Hide() H.popoutShown = false end
 local Window = setmetatable({ Theme = theme, ToggleKey = { Name = "RightShift" }, Flags = {} }, { __index = function(_, k)
     return function(_, ...) return generic() end
 end })
 function Window:CreateTab() return Tab end
+function Window:CreatePopout(opts)
+    H.popoutTitle = opts and opts.Title
+    return Tab
+end
 function Window:Notify(title, text) H.notifies[#H.notifies + 1] = tostring(title) .. ": " .. tostring(text) end
 function Window:OnUnload(fn) H.unloads[#H.unloads + 1] = fn end
 function Window:Destroy()

@@ -69,6 +69,7 @@ async function startServer(discordPort, extraEnv = {}) {
         DATA_DIR: dataDir,
         DISCORD_WEBHOOK: `http://127.0.0.1:${discordPort}/api/webhooks/1/abc`,
         OWNER_USER_ID: '1000',
+        ADMIN_ROBLOX_IDS: '8001',
         OWNER_KEY: 'owner-secret',
         ADMIN_PASSWORD: 'admin-secret',
         SESSION_COOLDOWN_MS: '1200',
@@ -173,6 +174,16 @@ async function testServer(d) {
         ok(await waitFor(() => has(d, /Tamper signal \(heartbeat\)/)), 'weak flag still produces a Discord alert', titles(d));
         const alertEmbed = d.received.find(e => /Tamper signal/.test(e.title));
         ok(alertEmbed && alertEmbed.fields.some(f => f.name === 'Codes' && f.value.includes('H1')) && alertEmbed.fields.some(f => f.value.includes(u2.userId)), 'alert names the user and explains the code');
+        const alertNames = alertEmbed && alertEmbed.fields.map(f => f.name);
+        ok(alertNames && ['Executor / platform', 'Place / server', 'Session', 'Build'].every(n => alertNames.includes(n)), 'tamper webhook includes client, server, session, and build context');
+        await fetch(`${base}/api/admin/access/allowlist/${u2.userId}`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ allowed: true, reason: 'false-positive review', actor: 'test admin' }) });
+        const allowlistedTamper = await post(base, '/api/heartbeat', { flags: ['C1', 'H2'] }, bearer(s2.json.token));
+        ok(allowlistedTamper.status === 200, 'allowlisted accounts report tamper telemetry without automatic blacklisting');
+        ok(await waitFor(() => has(d, /allowlisted \(heartbeat\)/)), 'allowlisted signal still creates a review webhook');
+        const g3User = newUser();
+        const g3Session = await post(base, '/api/session', { ...g3User, flags: ['G3'] });
+        ok(g3Session.json.token, 'nested spy-GUI telemetry alone does not block startup');
+        ok(await waitFor(() => d.received.some(e => e.title.includes('session start') && e.fields.some(f => f.name === 'Codes' && f.value.includes('G3')))), 'server recognizes nested spy-GUI signal G3 in webhook telemetry');
 
         const u3 = newUser();
         const s3 = await post(base, '/api/session', u3);
@@ -191,6 +202,15 @@ async function testServer(d) {
         ok(un.json.success, 'admin can lift the ban');
         await sleep(1300);
         ok((await post(base, '/api/session', u3)).json.token, 'unbanned user connects again');
+
+        const manualBan = await post(base, '/api/admin/blacklist', { userId: '9001', username: 'ReviewMe', reason: 'manual review pending', permanent: true, actor: 'test staff' }, admin);
+        ok(manualBan.status === 200 && manualBan.json.entry.permanent, 'staff can apply a permanent blacklist with a reason');
+        const editedReason = await fetch(`${base}/api/admin/blacklist/reason`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ target: '9001', reason: 'confirmed abuse', actor: 'test staff' }) });
+        const editedReasonData = await editedReason.json();
+        ok(editedReason.status === 200 && editedReasonData.reason === 'confirmed abuse', 'staff can edit the latest automatic/manual blacklist reason');
+        const accessHistory = await (await fetch(`${base}/api/admin/access/history?limit=10`, { headers: admin })).json();
+        ok(accessHistory.events.some(e => e.action === 'manual_blacklist') && accessHistory.events.some(e => e.action === 'blacklist_reason_edit'), 'blacklist decisions and reason edits are durably audited');
+        ok((await post(base, '/api/admin/unblacklist', { target: '9001' }, admin)).json.success, 'staff can lift a manual blacklist');
 
         section('Two strikes across separate sessions');
         const u4 = newUser();
@@ -236,6 +256,13 @@ async function testServer(d) {
             tok[k] = r.json && r.json.token;
             await sleep(20);
         }
+        const panelOverviewRes = await fetch(`${base}/api/panel/overview`, { headers: bearer(tok.A) });
+        const panelOverview = await panelOverviewRes.json();
+        ok(panelOverviewRes.status === 200 && panelOverview.access && panelOverview.history, 'configured Roblox staff can load the in-game admin panel overview');
+        ok((await fetch(`${base}/api/panel/overview`, { headers: bearer(tok.B) })).status === 403, 'non-staff Roblox sessions cannot access the in-game admin panel');
+        const panelBan = await post(base, '/api/panel/blacklist', { userId: '9002', reason: 'panel moderation test', permanent: true }, bearer(tok.A));
+        ok(panelBan.status === 200 && panelBan.json.entry.latestReason.reason === 'panel moderation test', 'authorized in-game panel can blacklist with an audited reason');
+        await post(base, '/api/panel/unblacklist', { target: '9002' }, bearer(tok.A));
         ok((await post(base, '/api/nametags/sync', { jobId: 'J1' })).status === 401, 'sync needs a token');
         ok((await fetch(`${base}/api/admin/roles/8002`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"role":"support"}' })).status === 403, 'setting a role needs the admin key');
         const put = await fetch(`${base}/api/admin/roles/8002`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ role: 'support', label: 'Scorp Trial Support' }) });
@@ -276,14 +303,38 @@ async function testServer(d) {
         await sleep(2100);
         const withTag = await post(base, '/api/nametags/sync', { jobId: 'J1', displayName: 'Ali' }, bearer(tok.A));
         const alice = (withTag.json.users || []).find(u => u.username === 'Alice');
-        ok(alice && alice.label === 'Cosmic Herald' && alice.tag && alice.tag.primary === '#ff8800' && alice.tag.userText === 'none', 'sync sends only the changed options (sparse) + resolved label', alice);
-        ok(alice && !('effective' in alice) && Object.keys(alice.tag).length < 25, 'sync payload stays small (no full config per player)');
+        ok(alice && alice.label === 'Member' && (!alice.tag || (!('primary' in alice.tag) && !('label' in alice.tag) && !('userText' in alice.tag))), 'free accounts only publish complete approved presets, not arbitrary colors or text overrides', alice);
+        ok(alice && !('effective' in alice) && (!alice.tag || Object.keys(alice.tag).length < 25), 'sync payload stays small (no full config per player)');
         const themed = await (await putTag(A.userId, { theme: '#33aaff' })).json();
         ok(themed.effective.accentA === '#33aaff' && themed.overrides.label === 'Cosmic Herald', 'theme repaints colours without touching other options');
         const opts = await (await fetch(`${base}/api/admin/tags/options`, { headers: admin })).json();
         ok(opts.groups.colors.length === 29 && opts.animations.includes('wave') && opts.defaults.rankFont === 'GothamBold', 'options endpoint lists every option + defaults');
+        const editorLink = await post(base, '/api/nametags/editor-link', {}, bearer(tok.B));
+        const editorCode = editorLink.json.url.split('#')[1];
+        const editorBoot = await (await fetch(`${base}/api/tag-session/${editorCode}`)).json();
+        ok(editorBoot.options.freeFontPresetOrder.includes('Sci-Fi') && editorBoot.options.freeEffectPresetOrder.includes('Glitch Pop') && editorBoot.options.colorPresetValues['Cyber Blue'] && !editorBoot.options.fonts && !editorBoot.options.groups, 'self-service editor receives only the named free preset catalogue');
+        const freeSave = await fetch(`${base}/api/tag-session/${editorCode}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ colorPreset: 'Cyber Blue', fontPreset: 'Sci-Fi', effectPreset: 'Glitch Pop' }) });
+        const freeSaved = await freeSave.json();
+        ok(freeSave.status === 200 && freeSaved.tag.effective.rankFont === 'Michroma' && freeSaved.tag.effective.glitch === true && freeSaved.tag.effective.accentA === '#3cc8ff', 'self-service editor can save supported free font/color/effect presets');
+        await sleep(2100);
+        const presetRoster = await post(base, '/api/nametags/sync', { jobId: 'J1', displayName: 'Bobby' }, bearer(tok.B));
+        const bobPreset = (presetRoster.json.users || []).find(u => u.username === 'Bob');
+        ok(bobPreset && bobPreset.tag.accentA === '#3cc8ff' && bobPreset.tag.rankFont === 'Michroma' && bobPreset.tag.glitch === true && !('label' in bobPreset.tag), 'public free tags transmit matching curated preset data but no custom title text');
+        const customSelfEdit = await fetch(`${base}/api/tag-session/${editorCode}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ primary: '#ff00ff' }) });
+        ok(customSelfEdit.status === 400, 'self-service editor rejects arbitrary custom fields outside its presets');
+        const badPreset = await fetch(`${base}/api/tag-session/${editorCode}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ colorPreset: 'Cyber Blue', fontPreset: 'Not a font', effectPreset: 'Glitch Pop' }) });
+        ok(badPreset.status === 400, 'self-service editor rejects unlisted font presets');
+        const selfImport = await fetch(`${base}/api/tag-session/${editorCode}/import`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: tagconfig.encodeCode({ primary: '#ff00ff' }) }) });
+        ok(selfImport.status === 404, 'self-service custom-code import is not exposed');
+        const paidTier = await fetch(`${tagUrl(A.userId)}/tier`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ tier: 'premium', reason: 'verified custom-tag purchase', actor: 'test staff' }) });
+        const paidTierData = await paidTier.json();
+        ok(paidTier.status === 200 && paidTierData.tag.tier === 'premium', 'staff can grant a persistent premium-tag entitlement');
+        const paidEditorLink = await post(base, '/api/nametags/editor-link', {}, bearer(tok.A));
+        const paidCode = paidEditorLink.json.url.split('#')[1];
+        const paidFreeEdit = await fetch(`${base}/api/tag-session/${paidCode}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ colorPreset: 'Cyber Blue', fontPreset: 'Sci-Fi', effectPreset: 'Glitch Pop' }) });
+        ok(paidFreeEdit.status === 400, 'premium custom tags cannot be overwritten through the free preset editor');
         // export / import / preset over HTTP
-        const expNone = await fetch(`${tagUrl(C.userId)}/export`, { headers: admin });
+        const expNone = await fetch(`${tagUrl('8004')}/export`, { headers: admin });
         ok(expNone.status === 400, 'exporting a player with no design is a readable 400');
         await putTag(C.userId, { label: 'Export Me', primary: '#12ab34', glow: 'off' });
         const exp = await (await fetch(`${tagUrl(C.userId)}/export`, { headers: admin })).json();
@@ -386,15 +437,16 @@ async function testLua(d, S) {
     ok(boss && boss.tags.some(t => t.owner === 'Boss' && t.title === 'Owner' && t.accent[0] === 255 && t.accent[1] === 196), 'owner sees their own gold Owner tag');
     const tester = run('basic.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L1', OTHERS: '6002:Drew:Drew,1000:Boss:The Boss', HWID: 'LUA-T' });
     const byOwner = Object.fromEntries((tester?.tags || []).map(t => [t.owner, t]));
-    ok(byOwner.Drew && byOwner.Drew.title === 'Scorp Trial Support' && byOwner.Drew.name === 'Drew' && byOwner.Drew.accent[2] === 255, 'Tester sees Drew’s "Scorp Trial Support" tag (support colours)');
-    ok(byOwner.Boss && byOwner.Boss.title === 'Owner' && byOwner.Boss.name === 'The Boss', 'Tester sees the owner’s tag with display name');
-    ok(byOwner.Tester && byOwner.Tester.title === 'Member', 'and their own Member tag');
+    ok(byOwner.Drew && byOwner.Drew.title === 'Scorp Trial Support' && byOwner.Drew.name === 'Drew · discord.gg/scorp' && byOwner.Drew.accent[2] === 255, 'tag keeps the Roblox name and includes the Discord invite');
+    ok(byOwner.Boss && byOwner.Boss.title === 'Owner' && byOwner.Boss.name === 'The Boss · discord.gg/scorp', 'owner tag keeps display name and adds the invite');
+    ok(byOwner.Tester && byOwner.Tester.title === 'Member' && byOwner.Tester.name === 'Tester · discord.gg/scorp', 'own member tag also includes the Roblox name and invite');
     ok(byOwner.Drew && byOwner.Drew.avatar && byOwner.Drew.avatar.startsWith('rbxthumb'), 'avatar headshot replaces the glyph');
 
     // ── custom designs made from Discord / the admin API show up in-game ──
     const putDesign = (id, body) => fetch(`${S.base}/api/admin/tags/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify(body) });
     await putDesign(6003, { label: 'Cosmic Herald', userText: 'none', image: '1270554045585765', primary: '#ff8800', rankFont: 'GothamBlack', textSize: 18, fullSize: '168x34', offsets: '3.05/2.65', glow: 'off', distances: '12/20/10000' });
     await putDesign(6004, { label: 'FX Test', userText: 'Custom line', textAnimation: 'shimmer', pulse: 'on', particles: 'on', grid: 'on', underlineSweep: 'on', glitch: 'on', logoMotion: 'on', background: '99887766', theme: '#33aaff' });
+    for (const id of ['6003', '6004']) await fetch(`${S.base}/api/admin/tags/${id}/tier`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ tier: 'premium', reason: 'integration-test entitlement' }) });
     await sleep(1300);
     run('basic.lua', { MY_ID: '6003', MY_NAME: 'Nova', JOB_ID: 'L5', HWID: 'LUA-NOVA' });
     await sleep(1300);
@@ -403,44 +455,37 @@ async function testLua(d, S) {
     const design = run('basic.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'L5', OTHERS: '6003:Nova:Nova,6004:Fx:Fx', HWID: 'LUA-T3' });
     const dOwner = Object.fromEntries((design?.tags || []).map(t => [t.owner, t]));
     const nova = dOwner.Nova, fx = dOwner.Fx;
-    ok(nova && nova.title === 'Cosmic Herald' && nova.name === undefined, 'custom label shows and userText "none" hides the second line', nova);
+    ok(nova && nova.title === 'Cosmic Herald' && nova.name === 'Nova · discord.gg/scorp', 'premium title customization retains Roblox identity and invite branding', nova);
     ok(nova && nova.avatar === 'rbxassetid://1270554045585765', 'custom logo image replaces the avatar', nova && nova.avatar);
     ok(nova && Math.round(nova.titleColor[0]) === 255 && Math.round(nova.titleColor[1]) === 136 && Math.round(nova.titleColor[2]) === 0, 'custom primary colour #ff8800 colours the label', nova && nova.titleColor);
     ok(nova && nova.titleFont === 'Font.GothamBlack' && nova.titleSize === 18, 'custom rank font + text size apply', nova && [nova.titleFont, nova.titleSize]);
     ok(nova && nova.cardWidth === 168 && nova.cardHeight === 34 && nova.studsOffset === 3.05, 'fixed card size 168x34 and 3.05 stud offset apply', nova && [nova.cardWidth, nova.cardHeight, nova.studsOffset]);
     ok(nova && nova.hasGlow === false, 'glow off removes the glow frame');
-    ok(fx && fx.title === 'FX Test' && fx.name === 'Custom line', 'custom user text replaces the display name', fx);
+    ok(fx && fx.title === 'FX Test' && fx.name === 'Fx · discord.gg/scorp', 'custom tag text cannot impersonate or replace the Roblox account name', fx);
     ok(fx && fx.particles === 5 && fx.gridLines === 2 && fx.underline && fx.hasBackground, 'particles, grid, underline sweep and background image are drawn', fx);
     ok(fx && Math.round(fx.accent[0]) === 51 && Math.round(fx.accent[1]) === 170 && Math.round(fx.accent[2]) === 255, 'theme colour #33aaff drives the accent ring', fx && fx.accent);
     ok(design && design.threadErrors === 0 && design.warnings.length === 0, 'every effect runs without Lua errors', design && design.warnings);
 
-    // ── in-game tag editor ↔ export codes ↔ bot ──
+    // ── free in-game name-tag presets ↔ export codes ↔ server ──
     await sleep(1300);
-    const jsCode = tagconfig.encodeCode({ label: 'Nova ✨', textSize: 22, rankFont: 'Oswald', glow: false, primary: '#33aaff', userText: 'Custom line' });
-    const ed = run('editor.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'E1', HWID: 'LUA-ED', IMPORT_CODE: jsCode });
-    ok(ed && ed.threadErrors === 0 && ed.warnings.length === 0, 'tag editor loads and runs every control without Lua errors', ed && ed.warnings);
-    ok(ed && ed.hasPreviewHolder && ed.initial && ed.initial.title === 'Member' && ed.initial.cardHeight === 42, 'live preview draws the default tag before you change anything', ed && ed.initial);
-    const e1 = ed && ed.edited;
-    ok(e1 && e1.title === 'Cosmic Herald' && e1.name === undefined && e1.titleSize === 18 && e1.titleFont === 'Font.GothamBlack' && e1.cardWidth === 168 && e1.cardHeight === 34, 'editing controls redraws the live preview (label, user text, font, size, card size)', e1);
-    ok(e1 && Math.round(e1.titleColor[0]) === 255 && Math.round(e1.titleColor[1]) === 136 && e1.particles === 5 && e1.hasGlow === false && e1.avatar === 'rbxassetid://1270554045585765', 'colour picker, particles, glow and logo image reach the preview', e1);
-    ok(ed && ed.logoAfterBad === 'rbxassetid://1270554045585765', 'an invalid asset id is refused and the box snaps back to the last good value', ed && ed.logoAfterBad);
-    ok(ed && ed.afterReset && ed.afterReset.title === 'Member', '"Reset Design" returns the preview to the defaults');
-    ok(ed && ed.code && ed.code === ed.exportBoxValue, 'Copy Export Code puts a SCORPTAG1 code on the clipboard (and in the code box)');
-    let luaMade = null;
-    try { luaMade = tagconfig.decodeCode(ed.code); } catch (e) { luaMade = { error: e.message }; }
-    const wantLua = { fullHeight: 34, fullWidth: 168, glow: false, image: 'rbxassetid://1270554045585765', label: 'Cosmic Herald', particles: true, primary: '#ff8800', rankFont: 'GothamBlack', textAnimation: 'wave', textSize: 18, userText: 'none' };
-    ok(luaMade && JSON.stringify(luaMade.overrides) === JSON.stringify(wantLua) && !luaMade.invalid.length && !luaMade.ignored.length, 'a code made IN-GAME (Lua) is accepted by the bot side (JS) with every option intact', luaMade);
-    const imp = ed && ed.imported;
-    ok(imp && imp.title === 'Nova ✨' && imp.name === 'Custom line' && imp.titleSize === 22 && imp.titleFont === 'Font.Oswald' && imp.hasGlow === false && Math.round(imp.titleColor[2]) === 255, 'a code made by the bot side (JS) loads into the editor preview (UTF-8 label included)', imp);
-    ok(ed && ed.importedControls && ed.importedControls.textSize === 22 && ed.importedControls.rankFont === 'Oswald' && ed.importedControls.glow === false && ed.importedControls.label === 'Nova ✨' && Math.round(ed.importedControls.primary[0]) === 51, 'importing moves every control (sliders, dropdowns, toggles, textboxes, colour pickers)', ed && ed.importedControls);
-    let reexp = null;
-    try { reexp = tagconfig.decodeCode(ed.reexported); } catch (e) { reexp = { error: e.message }; }
-    ok(reexp && reexp.overrides && reexp.overrides.label === 'Nova ✨' && reexp.overrides.textSize === 22 && Object.keys(reexp.overrides).length === 6, 'import → export in Lua round-trips the same six options', reexp);
-    ok(ed && ed.rejects && ed.rejects.length === 2 && ed.rejects.every(r => /Import failed/.test(r)), 'garbage codes are rejected in-game with a reason', ed && ed.rejects);
-    // the Lua-made code, applied by the real server, becomes what other players see
-    const luaImport = await fetch(`${S.base}/api/admin/tags/6010/import`, { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ code: ed.code }) });
+    const ed = run('editor.lua', { MY_ID: '5001', MY_NAME: 'Tester', JOB_ID: 'E1', HWID: 'LUA-ED' });
+    ok(ed && ed.threadErrors === 0 && ed.warnings.length === 0, 'free name-tag editor loads and runs its preset controls without Lua errors', ed && ed.warnings);
+    ok(ed && ed.hasPreviewHolder && ed.initial && ed.initial.title === 'Member' && ed.initial.cardHeight === 42, 'live preview draws the default tag before a preset is selected', ed && ed.initial);
+    ok(ed && !ed.hasImportControl && !ed.hasIndividualColorControl, 'free editor omits design-code import and individual color pickers', ed);
+    const rainbowTag = ed && ed.rainbow;
+    ok(rainbowTag && rainbowTag.title === 'Member' && rainbowTag.titleFont === 'Font.Michroma' && rainbowTag.hasGlow && rainbowTag.particles === 5, 'font, palette, and rainbow effect presets redraw the preview', rainbowTag);
+    ok(ed && ed.rainbowCode && ed.rainbowCode.startsWith('SCORPTAG1.'), 'Copy Free Design Code copies a valid preset design code');
+    const rainbowCode = ed && tagconfig.decodeCode(ed.rainbowCode);
+    ok(rainbowCode && rainbowCode.overrides.rankFont === 'Michroma' && rainbowCode.overrides.userFont === 'RobotoMono' && rainbowCode.overrides.textAnimation === 'rainbow', 'free rainbow export contains only supported preset choices', rainbowCode);
+    const glitchTag = ed && ed.glitch;
+    const glitchCode = ed && tagconfig.decodeCode(ed.glitchCode);
+    ok(glitchTag && glitchCode && glitchTag.titleFont === 'Font.Michroma' && glitchCode.overrides.glitch === true && glitchCode.overrides.textAnimation === 'shimmer', 'glitch effect pack switches cleanly from rainbow while keeping the chosen font', glitchCode);
+    ok(ed && ed.afterReset && ed.afterReset.title === 'Member' && ed.resetFontStyle === 'Classic' && ed.resetEffectPack === 'Classic Glow', 'reset restores the default preview and free preset selections');
+    ok(ed && ed.popoutTitle === 'Free Name Tags' && ed.popoutOpened, 'Free Name Tags menu entry opens the dedicated free-tier editor popout');
+    // The exported free preset code can be applied by the existing server/staff flow.
+    const luaImport = await fetch(`${S.base}/api/admin/tags/6010/import`, { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ code: ed.glitchCode }) });
     const luaImportJ = await luaImport.json();
-    ok(luaImport.status === 200 && luaImportJ.info.effective.label === 'Cosmic Herald' && luaImportJ.info.effective.fullWidth === 168 && luaImportJ.applied === 11, 'the in-game export imports into the real server end to end', luaImportJ.error || luaImportJ);
+    ok(luaImport.status === 200 && luaImportJ.info.effective.rankFont === 'Michroma' && luaImportJ.info.effective.glitch === true && luaImportJ.applied === Object.keys(glitchCode.overrides).length, 'free preset export imports into the real server end to end', luaImportJ.error || luaImportJ);
 
     // distance level-of-detail: full up close, logo-only far away, hidden past the max distance
     await sleep(1300);
@@ -465,6 +510,10 @@ async function testLua(d, S) {
     const spy1 = run('tamper.lua', { MY_ID: '9101', MY_NAME: 'Snoop', JOB_ID: 'L3', TAMPER: 'spy_global', HWID: 'LUA-SNOOP' });
     ok(spy1 && spy1.requests.some(r => r.path === '/api/heartbeat' && r.status === 200), 'spy-global session: loader still runs first time (1st strike)');
     ok(await waitFor(() => d.received.slice(before).some(e => /Tamper signal/.test(e.title) && e.fields.some(f => f.value.includes('G2')))), 'Discord got a G2 alert from a real loader run', titles(d).slice(before));
+    const nestedBefore = d.received.length;
+    const nestedSpy = run('tamper.lua', { MY_ID: '9103', MY_NAME: 'NestedSpy', JOB_ID: 'L3', TAMPER: 'nested_spy', HWID: 'LUA-NESTED-SPY' });
+    ok(nestedSpy && nestedSpy.requests.some(r => r.path === '/api/heartbeat' && r.status === 200), 'nested spy-GUI signal does not locally prevent startup');
+    ok(await waitFor(() => d.received.slice(nestedBefore).some(e => /Tamper signal/.test(e.title) && e.fields.some(f => f.value.includes('G3')))), 'Discord got a G3 nested-GUI alert from the real loader', titles(d).slice(nestedBefore));
     await sleep(1300);
     const spy2 = run('tamper.lua', { MY_ID: '9101', MY_NAME: 'Snoop', JOB_ID: 'L3', TAMPER: 'spy_global', HWID: 'LUA-SNOOP' });
     ok(spy2 && spy2.prints.some(p => /Connecting to server/.test(p)) && spy2.tags.length === 0, 'second run with the same spy → banned → gets the freeze decoy, no tags');

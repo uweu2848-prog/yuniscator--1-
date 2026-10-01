@@ -29,6 +29,10 @@
                border:1px solid; box-shadow:0 0 24px 0 rgba(124,58,237,.35);}
   .preview-tag img{width:26px;height:26px;border-radius:6px;}
   .preview-rank{font-weight:700;font-size:13px;}
+  .preview-rank.rainbow{background:linear-gradient(90deg,#ff496e,#ffc44d,#4de7a1,#53b9ff,#b46bff,#ff496e);background-size:220% 100%;background-clip:text;color:transparent;animation:rainbow-shift 3s linear infinite;}
+  .preview-rank.glitching{animation:glitch-flicker 2.8s steps(2,end) infinite;}
+  @keyframes rainbow-shift{to{background-position:220% 0;}}
+  @keyframes glitch-flicker{0%,92%,100%{transform:translateX(0)}94%{transform:translateX(2px)}96%{transform:translateX(-2px)}}
   .preview-user{font-size:11px;opacity:.85;}
 
   nav.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
@@ -63,6 +67,10 @@
     color:var(--muted);border-radius:8px;padding:10px;font-size:11.5px;font-family:monospace;resize:vertical;}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
   .hint{font-size:11.5px;color:var(--muted);margin-top:4px;}
+  .tier-intro{margin:0 0 16px;color:var(--muted);font-size:13px;line-height:1.6;}
+  .tier-title{margin:0 0 8px;font-size:14px;}
+  .premium-card{border-color:#49356e;background:linear-gradient(135deg,#171027,#100c1d);}
+  .premium-badge{display:inline-block;margin-bottom:10px;padding:4px 8px;border:1px solid #7251a7;border-radius:999px;color:#c6a9ff;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;}
   #gate{max-width:420px;margin:80px auto;text-align:center;}
   #gate p{color:var(--muted);font-size:13px;}
 </style>
@@ -71,7 +79,7 @@
 <div class="wrap" id="app" style="display:none;">
   <header>
     <div class="logo">M7</div>
-    <div><h1>NAMETAG EDITOR</h1><p id="whoami">—</p></div>
+    <div><h1>FREE NAMETAG STUDIO</h1><p id="whoami">—</p></div>
     <div id="status">connecting…</div>
   </header>
 
@@ -85,30 +93,24 @@
     </div>
   </div>
 
-  <div class="card">
-    <div class="row" style="margin-bottom:14px;">
-      <label class="hint" style="margin:0;">Preset</label>
-      <select class="presetSelect" id="presetSelect"></select>
-      <button class="btn btn-ghost" id="applyPreset">Apply preset</button>
-      <button class="btn btn-ghost" id="resetAll" style="margin-left:auto;">Reset to default</button>
+  <div class="card" id="freeEditor">
+    <h2 class="tier-title">Free Name Tags</h2>
+    <p class="tier-intro">Choose a ready-made color palette, a paired font style, and an animated effect pack. These presets give every free tag a polished look without overwhelming customization controls.</p>
+    <div class="grid">
+      <div class="field"><label for="colorPreset">Color theme</label><select id="colorPreset"></select></div>
+      <div class="field"><label for="fontPreset">Font style</label><select id="fontPreset"></select></div>
+      <div class="field"><label for="effectPreset">Effect pack</label><select id="effectPreset"></select></div>
     </div>
-
-    <nav class="tabs" id="tabs"></nav>
-    <div class="grid" id="fields"></div>
-
     <div class="actions">
-      <button class="btn btn-primary" id="saveBtn">Save Tag</button>
-      <button class="btn btn-ghost" id="exportBtn">Copy Export Code</button>
+      <button class="btn btn-primary" id="saveBtn">Save Free Name Tag</button>
+      <button class="btn btn-ghost" id="resetAll">Reset to default</button>
     </div>
+  </div>
 
-    <div style="margin-top:14px;">
-      <label class="hint">Export / import code</label>
-      <textarea id="exportBox" placeholder="SCORPTAG1.…"></textarea>
-      <div class="row" style="margin-top:8px;">
-        <button class="btn btn-ghost" id="importBtn">Import code</button>
-        <span class="hint" id="importMsg"></span>
-      </div>
-    </div>
+  <div class="card premium-card" id="premiumInfo">
+    <span class="premium-badge">Planned · Paid Tier</span>
+    <h2 class="tier-title">Want more control?</h2>
+    <p class="tier-intro" style="margin-bottom:0;">Premium name tags are planned to add custom colors, expanded font choices, image and layout options, and individual effect tuning. Your free presets will remain available.</p>
   </div>
 </div>
 
@@ -136,14 +138,42 @@
     }).then(r => r.json().then(d => { if (!r.ok || d.ok === false) throw new Error(d.error || 'request failed'); return d; }));
   }
 
-  let OPTIONS = null;   // groups/types/fonts/animations/defaults/rolePresets/colorPresets/ranges
-  let overrides = {};   // current stored overrides (server truth)
-  let draft = {};        // in-progress local edits, same shape as overrides
-  let effective = {};    // defaults + role preset + overrides, resolved
-  let activeGroup = 'text';
+  let OPTIONS = null;
+  let tag = null;
+  let baseTag = {};
+  let selections = { colorPreset: 'Silver Surfer', fontPreset: 'Classic', effectPreset: 'Classic Glow' };
 
-  const TAB_LABELS = { text: 'Text & Font', layout: 'Images & Layout', colors: 'Colors', effects: 'Effects' };
-  const pretty = k => k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
+  function fillSelect(id, values, selected){
+    const select = document.getElementById(id);
+    select.innerHTML = '';
+    values.forEach(value => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      option.selected = value === selected;
+      select.appendChild(option);
+    });
+  }
+
+  function matchesPreset(name, values, keys, target){
+    const candidate = Object.assign({}, baseTag, values[name] || {});
+    return keys.every(key => candidate[key] === target[key]);
+  }
+
+  function loadSelections(){
+    const current = tag.effective || {};
+    const color = OPTIONS.colorPresets.find(name => matchesPreset(name, OPTIONS.colorPresetValues, OPTIONS.colorKeys, current));
+    const fonts = OPTIONS.freeFontPresetOrder.find(name => matchesPreset(name, OPTIONS.freeFontPresets, ['rankFont','userFont'], current));
+    const effects = OPTIONS.freeEffectPresetOrder.find(name => matchesPreset(name, OPTIONS.freeEffectPresets, ['textAnimation', ...OPTIONS.groups.effects.slice(1)], current));
+    selections = {
+      colorPreset: color || 'Silver Surfer',
+      fontPreset: fonts || 'Classic',
+      effectPreset: effects || 'Classic Glow',
+    };
+    fillSelect('colorPreset', OPTIONS.colorPresets, selections.colorPreset);
+    fillSelect('fontPreset', OPTIONS.freeFontPresetOrder, selections.fontPreset);
+    fillSelect('effectPreset', OPTIONS.freeEffectPresetOrder, selections.effectPreset);
+  }
 
   function boot(){
     gate.style.display = 'none';
@@ -151,135 +181,62 @@
     setStatus('loading…');
     api('').then(d => {
       OPTIONS = d.options;
-      overrides = d.tag.overrides || {};
-      draft = Object.assign({}, overrides);
+      tag = d.tag;
+      baseTag = Object.assign({}, OPTIONS.defaults, OPTIONS.rolePresets[tag.role] || {}, { label: tag.roleLabel });
       document.getElementById('whoami').textContent = d.username + ' · ' + d.tag.roleLabel;
+      if (tag.tier === 'premium') {
+        document.getElementById('freeEditor').style.display = 'none';
+        document.querySelector('#premiumInfo .premium-badge').textContent = 'Premium Tag Active';
+        document.querySelector('#premiumInfo .tier-title').textContent = 'Your custom tag is staff-managed';
+        document.querySelector('#premiumInfo .tier-intro').textContent = 'This account has a premium nametag. Contact Scorp staff in Discord for approved design changes; the free preset editor cannot overwrite it.';
+      }
+      loadSelections();
+      recomputePreview();
       setStatus('all changes saved', 'ok');
-      buildPresets();
-      buildTabs();
-      renderFields();
-      recomputeEffective();
     }).catch(e => setStatus(e.message, 'err'));
   }
 
-  function buildPresets(){
-    const sel = document.getElementById('presetSelect');
-    sel.innerHTML = OPTIONS.colorPresets.map(n => `<option>${n}</option>`).join('');
-  }
-
-  function buildTabs(){
-    const tabs = document.getElementById('tabs');
-    tabs.innerHTML = '';
-    Object.keys(OPTIONS.groups).forEach(g => {
-      const b = document.createElement('button');
-      b.textContent = TAB_LABELS[g] || pretty(g);
-      b.className = g === activeGroup ? 'active' : '';
-      b.onclick = () => { activeGroup = g; buildTabs(); renderFields(); };
-      tabs.appendChild(b);
-    });
-  }
-
-  function valueFor(key){ return draft[key] !== undefined ? draft[key] : OPTIONS.defaults[key]; }
-
-  function setField(key, value){
-    if (value === OPTIONS.defaults[key]) delete draft[key]; else draft[key] = value;
-    recomputeEffective();
-    setStatus('unsaved changes');
-  }
-
-  function renderFields(){
-    const wrap = document.getElementById('fields');
-    wrap.innerHTML = '';
-    const keys = OPTIONS.groups[activeGroup] || [];
-    keys.forEach(key => {
-      const type = OPTIONS.types[key];
-      const field = document.createElement('div');
-      field.className = 'field' + (type === 'bool' ? ' bool' : '');
-      const val = valueFor(key);
-
-      if (type === 'bool') {
-        field.innerHTML = `<label>${pretty(key)}</label>`;
-        const sw = document.createElement('div');
-        sw.className = 'switch' + (val ? ' on' : '');
-        sw.onclick = () => { const nv = !valueFor(key); sw.className = 'switch' + (nv ? ' on' : ''); setField(key, nv); };
-        field.appendChild(sw);
-      } else if (type === 'color') {
-        field.innerHTML = `<label>${pretty(key)}</label><input type="color" value="${val}">`;
-        field.querySelector('input').oninput = e => setField(key, e.target.value);
-      } else if (type === 'font') {
-        field.innerHTML = `<label>${pretty(key)}</label><select>${OPTIONS.fonts.map(f => `<option ${f===val?'selected':''}>${f}</option>`).join('')}</select>`;
-        field.querySelector('select').onchange = e => setField(key, e.target.value);
-      } else if (type === 'enum') {
-        field.innerHTML = `<label>${pretty(key)}</label><select>${OPTIONS.animations.map(a => `<option ${a===val?'selected':''}>${a}</option>`).join('')}</select>`;
-        field.querySelector('select').onchange = e => setField(key, e.target.value);
-      } else if (type === 'int' || type === 'float') {
-        const range = OPTIONS.ranges[key] || [];
-        field.innerHTML = `<label>${pretty(key)}</label><input type="number" value="${val}" ${range.length?`min="${range[0]}" max="${range[1]}"`:''} ${type==='float'?'step="0.1"':''}>`;
-        field.querySelector('input').oninput = e => setField(key, type === 'int' ? parseInt(e.target.value||0,10) : parseFloat(e.target.value||0));
-      } else { // text / asset
-        field.innerHTML = `<label>${pretty(key)}${type==='asset'?' (asset id, or blank)':''}</label><input type="text" value="${val ?? ''}">`;
-        field.querySelector('input').oninput = e => setField(key, e.target.value);
-      }
-      wrap.appendChild(field);
-    });
-  }
-
-  function recomputeEffective(){
-    effective = Object.assign({}, OPTIONS.defaults, draft);
+  function recomputePreview(){
+    const effective = Object.assign({}, baseTag,
+      OPTIONS.colorPresetValues[selections.colorPreset],
+      OPTIONS.freeFontPresets[selections.fontPreset],
+      OPTIONS.freeEffectPresets[selections.effectPreset]);
     document.getElementById('previewRank').textContent = effective.label || 'Member';
-    document.getElementById('previewUser').textContent = effective.userText === 'auto' ? document.getElementById('whoami').textContent.split(' · ')[0] : (effective.userText || '');
+    document.getElementById('previewUser').textContent = document.getElementById('whoami').textContent.split(' · ')[0] + ' · discord.gg/scorp';
     const tagEl = document.getElementById('previewTag');
     tagEl.style.background = `linear-gradient(180deg, ${effective.backgroundColorA}, ${effective.backgroundColorC})`;
     tagEl.style.borderColor = effective.outlineColorA;
-    document.getElementById('previewRank').style.color = effective.primary;
+    tagEl.style.boxShadow = `0 0 24px ${effective.outerGlowColor}66`;
+    const rank = document.getElementById('previewRank');
+    rank.className = 'preview-rank' + (effective.textAnimation === 'rainbow' ? ' rainbow' : '') + (effective.glitch ? ' glitching' : '');
+    rank.style.color = effective.textAnimation === 'rainbow' ? 'transparent' : effective.primary;
+    const fontMap = { Arcade: 'monospace', Code: 'monospace', Michroma: 'Arial, sans-serif', RobotoMono: 'monospace', FredokaOne: 'Trebuchet MS, sans-serif', Nunito: 'Arial, sans-serif', Kalam: 'Comic Sans MS, cursive', PatrickHand: 'Comic Sans MS, cursive', Creepster: 'Impact, fantasy' };
+    rank.style.fontFamily = fontMap[effective.rankFont] || 'Segoe UI, sans-serif';
     document.getElementById('previewUser').style.color = effective.nameColor;
     const img = document.getElementById('previewImg');
     img.style.display = effective.image ? 'block' : 'none';
     if (effective.image) img.src = 'https://www.roblox.com/asset-thumbnail/image?assetId=' + effective.image.replace('rbxassetid://','') + '&width=60&height=60&format=png';
   }
 
-  document.getElementById('applyPreset').onclick = () => {
-    api('/preset', { method: 'POST', body: { name: document.getElementById('presetSelect').value } })
-      .then(d => { overrides = d.tag.overrides; draft = Object.assign({}, overrides); renderFields(); recomputeEffective(); setStatus('preset applied', 'ok'); })
-      .catch(e => setStatus(e.message, 'err'));
-  };
+  ['colorPreset','fontPreset','effectPreset'].forEach(key => {
+    document.getElementById(key).onchange = event => {
+      selections[key] = event.target.value;
+      recomputePreview();
+      setStatus('unsaved changes');
+    };
+  });
 
   document.getElementById('resetAll').onclick = () => {
-    if (!confirm('Reset your whole nametag design back to default?')) return;
+    if (!confirm('Reset your nametag back to its default role design?')) return;
     api('', { method: 'DELETE' })
-      .then(d => { overrides = d.tag.overrides; draft = {}; renderFields(); recomputeEffective(); setStatus('reset', 'ok'); })
+      .then(d => { tag = d.tag; baseTag = Object.assign({}, OPTIONS.defaults, OPTIONS.rolePresets[tag.role] || {}, { label: tag.roleLabel }); loadSelections(); recomputePreview(); setStatus('reset', 'ok'); })
       .catch(e => setStatus(e.message, 'err'));
   };
 
   document.getElementById('saveBtn').onclick = () => {
-    const changed = {};
-    // only send keys that differ from what the server already has, or that were reset to default
-    const keys = new Set([...Object.keys(draft), ...Object.keys(overrides)]);
-    keys.forEach(k => { if (draft[k] !== overrides[k]) changed[k] = draft[k] === undefined ? 'default' : draft[k]; });
-    if (!Object.keys(changed).length) { setStatus('all changes saved', 'ok'); return; }
     setStatus('saving…');
-    api('', { method: 'PUT', body: changed })
-      .then(d => { overrides = d.tag.overrides; draft = Object.assign({}, overrides); setStatus('all changes saved', 'ok'); })
-      .catch(e => setStatus(e.message, 'err'));
-  };
-
-  document.getElementById('exportBtn').onclick = () => {
-    api('/export').then(d => {
-      document.getElementById('exportBox').value = d.code;
-      navigator.clipboard && navigator.clipboard.writeText(d.code).catch(()=>{});
-    }).catch(e => setStatus(e.message, 'err'));
-  };
-
-  document.getElementById('importBtn').onclick = () => {
-    const code = document.getElementById('exportBox').value.trim();
-    if (!code) return;
-    api('/import', { method: 'POST', body: { code, mode: 'replace' } })
-      .then(d => {
-        overrides = d.info.overrides; draft = Object.assign({}, overrides);
-        renderFields(); recomputeEffective();
-        document.getElementById('importMsg').textContent = `applied ${d.applied} option(s)`;
-        setStatus('imported', 'ok');
-      })
+    api('', { method: 'PUT', body: selections })
+      .then(d => { tag = d.tag; setStatus('free presets saved', 'ok'); })
       .catch(e => setStatus(e.message, 'err'));
   };
 

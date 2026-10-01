@@ -35,6 +35,18 @@ const FONTS = [
     'LuckiestGuy', 'PatrickHand', 'PermanentMarker', 'SpecialElite', 'AmaticSC', 'GrenzeGotisch',
 ];
 
+// Curated free-tier font styles. The editor offers style names, not the full font catalogue.
+const FREE_FONT_PRESETS = {
+    'Classic': { rankFont: 'GothamBold', userFont: 'Gotham' },
+    'Bold': { rankFont: 'GothamBlack', userFont: 'GothamMedium' },
+    'Arcade': { rankFont: 'Arcade', userFont: 'Code' },
+    'Sci-Fi': { rankFont: 'Michroma', userFont: 'RobotoMono' },
+    'Playful': { rankFont: 'FredokaOne', userFont: 'Nunito' },
+    'Handwritten': { rankFont: 'Kalam', userFont: 'PatrickHand' },
+    'Spooky': { rankFont: 'Creepster', userFont: 'SourceSans' },
+};
+const FREE_FONT_PRESET_ORDER = Object.keys(FREE_FONT_PRESETS);
+
 const ANIMATIONS = ['default', 'shimmer', 'rainbow', 'wave'];
 
 // Order here = order in the embed (matches the layout of the tag-import embed we mirror).
@@ -52,6 +64,17 @@ const COLOR_KEYS = [
     'gridColor', 'glitchColor',
 ];
 const EFFECT_KEYS = ['glow', 'pulse', 'spin', 'particles', 'underlineSweep', 'glitch', 'effects', 'grid', 'logoMotion'];
+
+// Preset effect packs combine supported renderer effects into one easy free-tier choice.
+// Each pack specifies every effect so switching packs never leaves stale toggles behind.
+const FREE_EFFECT_PRESETS = {
+    'Classic Glow': { textAnimation: 'default', effects: true, glow: true, pulse: false, spin: true, particles: false, underlineSweep: false, glitch: false, grid: false, logoMotion: false },
+    'Rainbow Fade': { textAnimation: 'rainbow', effects: true, glow: true, pulse: true, spin: true, particles: true, underlineSweep: true, glitch: false, grid: false, logoMotion: false },
+    'Glitch Pop': { textAnimation: 'shimmer', effects: true, glow: true, pulse: false, spin: true, particles: false, underlineSweep: true, glitch: true, grid: true, logoMotion: false },
+    'Cosmic Spark': { textAnimation: 'wave', effects: true, glow: true, pulse: true, spin: true, particles: true, underlineSweep: true, glitch: false, grid: true, logoMotion: true },
+    'Low-Key': { textAnimation: 'default', effects: false, glow: false, pulse: false, spin: false, particles: false, underlineSweep: false, glitch: false, grid: false, logoMotion: false },
+};
+const FREE_EFFECT_PRESET_ORDER = Object.keys(FREE_EFFECT_PRESETS);
 
 // ── Colour helpers ──────────────────────────────────────────────────────────
 const hexToRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
@@ -104,7 +127,7 @@ function paletteFromAccent(accent) {
 const DEFAULTS = Object.freeze({
     // text
     label: '',              // '' = use the role's label
-    userText: 'auto',       // auto = the player's display name, none = hide, anything else = that text
+    userText: 'auto',       // auto = no prefix; paid designs may add a prefix, but never replace the Roblox name
     rankFont: 'GothamBold',
     userFont: 'Gotham',
     textSize: 15,
@@ -421,7 +444,7 @@ function describe(eff) {
     return {
         text: [
             ['Label', eff.label],
-            ['User text', eff.userText === 'auto' ? 'auto' : eff.userText],
+            ['Name prefix', eff.userText === 'auto' || eff.userText === 'none' ? 'none' : eff.userText],
             ['Rank font', eff.rankFont],
             ['User font', eff.userFont],
             ['Text size', String(eff.textSize)],
@@ -450,7 +473,7 @@ function luaValue(v, depth = 1) {
     return rows.length ? `{\n${rows.join('\n')}\n${end}}` : '{}';
 }
 function toLua() {
-    const data = { defaults: { ...DEFAULTS }, presets: ROLE_PRESETS, roles: ROLE_META, animations: ANIMATIONS, fonts: FONTS, colorKeys: COLOR_KEYS, colorPresets: COLOR_PRESETS, presetOrder: PRESET_NAMES, ranges: RANGES, codePrefix: CODE_PREFIX };
+    const data = { defaults: { ...DEFAULTS }, presets: ROLE_PRESETS, roles: ROLE_META, animations: ANIMATIONS, fonts: FONTS, colorKeys: COLOR_KEYS, colorPresets: COLOR_PRESETS, presetOrder: PRESET_NAMES, freeFontPresets: FREE_FONT_PRESETS, freeFontPresetOrder: FREE_FONT_PRESET_ORDER, freeEffectPresets: FREE_EFFECT_PRESETS, freeEffectPresetOrder: FREE_EFFECT_PRESET_ORDER, ranges: RANGES, codePrefix: CODE_PREFIX };
     return `-- GENERATED from src/tagconfig.js at build time — do not edit by hand.\nlocal TAGDATA = ${luaValue(data)}\n`;
 }
 
@@ -459,5 +482,6 @@ module.exports = {
     DEFAULTS, ROLE_PRESETS, TagError,
     paletteFromAccent, parseOption, applyOption, themeOverrides, sanitizeOverrides, effectiveTag, describe, toLua,
     parseColor, parseAsset, lerpHex,
-    PRESET_NAMES, COLOR_PRESETS, presetOverrides, encodeCode, decodeCode, importOverrides, adler32, CODE_PREFIX,
+    PRESET_NAMES, COLOR_PRESETS, presetOverrides, FREE_FONT_PRESETS, FREE_FONT_PRESET_ORDER, FREE_EFFECT_PRESETS, FREE_EFFECT_PRESET_ORDER,
+    encodeCode, decodeCode, importOverrides, adler32, CODE_PREFIX,
 };

@@ -5,7 +5,7 @@
  *   Scorp Tag                                           [logo image]
  *   Tag for Roblox user `id` through your-server.example
  *   Target      username / display name, Roblox ID, Role, Source
- *   Text        Label · User text · Rank font · User font · Text size     (side by side …)
+ *   Text        Label · name prefix · Rank font · User font · Text size   (side by side …)
  *   Layout      Image · Background · Preview · Full · Mini · Offsets · Distances
  *   Colors      every colour option
  *   Effects     textAnimation + the on/off effects
@@ -90,6 +90,7 @@ async function buildTagEmbed(info, opts = {}) {
         user ? code(`${user.name} / ${user.displayName}`) : code(`Roblox user ${info.userId}`),
         `Roblox ID: ${code(info.userId)}`,
         `Role: ${code(roleShown)}`,
+        `Tag tier: ${code(info.tier || 'free')}`,
         `Source: ${code(SOURCE)}`,
     ].join('\n');
 

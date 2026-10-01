@@ -12,4 +12,12 @@ Server-Authoritative Nametags: Say goodbye to easily exploited client-side UI. S
 
 Smart Anti-Tamper & HWID Banning: Our security system evaluates client environments using opaque telemetry. When bad actors are detected, Scorp issues escalating bans linked securely to userId ↔ HWID—protecting legitimate players on shared IPs (like dorms or mobile networks) from collateral damage.
 
-Discord Integration: Manage user roles, preview custom tags, and receive tamper alerts directly in your community's Discord server.
+Discord Integration: Manage user roles and custom tags, apply curated style packs, control paid-tag entitlements, review detailed tamper alerts, and manage account access from `/access` commands or the private button dashboard opened with `/panel`.
+
+Moderation data is stored under `DATA_DIR` (`access.json`, `access-history.json`, `offenses.json`, and `paid-tags.json`). The allowlist only suppresses automatic tamper enforcement; an existing blacklist still blocks the account. Manual and automatic blacklist actions include reasons and are recorded in the moderation history.
+
+Set `ADMIN_ROBLOX_IDS` to a comma-separated list of trusted Roblox user IDs to authorize the in-game staff panel. `OWNER_USER_ID` is also authorized. Discord commands use `STAFF_DISCORD_IDS` when configured; otherwise they require the Discord Administrator permission.
+
+Nametag identity is always the player's Roblox display name, followed by `discord.gg/scorp`. Custom tag label text is staff-controlled. Free users may choose the available preset palette/font/effect combinations; staff-managed premium tags require an explicit premium entitlement and cannot be overwritten from the free editor.
+
+Client-side tamper checks and Lua obfuscation are deterrence/telemetry, not guarantees: any client-delivered code can eventually be inspected or modified. The authoritative controls are server-side access decisions, session checks, and the admin/Discord allowlist and blacklist.

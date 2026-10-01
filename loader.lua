@@ -29,6 +29,7 @@
 --    M1  game's __namecall / __index metamethods hooked with Lua closures
 --    G1  a GUI named like an HTTP spy is sitting in CoreGui / gethui()
 --    G2  a well-known spy global exists in _G / shared / getgenv()
+--    G3  a spy-like GUI is nested deeper under CoreGui / gethui()
 --
 --  These checks are best-effort. A careful attacker can defeat any client-side
 --  check; the server-side signals (never-confirmed sessions, IP correlation,
@@ -100,6 +101,26 @@ local function guiHasSpy(container)
     return false
 end
 
+local function guiHasNestedSpy(container)
+    local ok, descendants = pcall(function() return container:GetDescendants() end)
+    if not ok or type(descendants) ~= "table" then return false end
+    local direct = {}
+    local childrenOk, children = pcall(function() return container:GetChildren() end)
+    if childrenOk and type(children) == "table" then
+        for _, child in ipairs(children) do direct[child] = true end
+    end
+    for _, item in ipairs(descendants) do
+        local named, name = pcall(function() return item.Name end)
+        if not direct[item] and named and type(name) == "string" then
+            local n = string.lower(name)
+            for _, bad in ipairs(SPY_NAMES) do
+                if string.find(n, bad, 1, true) then return true end
+            end
+        end
+    end
+    return false
+end
+
 local function hasSpyGlobal()
     local envs = { _G, shared }
     if getgenv then
@@ -146,6 +167,8 @@ local function runChecks()
 
     local okCG, coreGui = pcall(function() return game:GetService("CoreGui") end)
     if (okCG and guiHasSpy(coreGui)) or (gethui and guiHasSpy(gethui())) then hit("G1", 2) end
+
+    if (okCG and guiHasNestedSpy(coreGui)) or (gethui and guiHasNestedSpy(gethui())) then hit("G3", 2) end
 
     if hasSpyGlobal() then hit("G2", 2) end
 

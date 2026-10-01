@@ -24,9 +24,14 @@ local Nametags = (function()
 --@include nametags.lua
 end)()
 
--- Tag editor (live preview + export/import codes; lives in src/tageditor.lua)
+-- Free name-tag presets + preview live in src/tageditor.lua.
 local TagEditor = (function()
 --@include tageditor.lua
+end)()
+
+-- Staff-only panel UI; every privileged action is independently authorized by the server.
+local AdminPanel = (function()
+--@include adminpanel.lua
 end)()
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -148,9 +153,9 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 --  Settings
 -- ───────────────────────────────────────────────────────────────────────────
--- Tag Editor: its own standalone window (Editor.Open() shows it), not a tab buried in
--- the main menu — see the header comment in src/tageditor.lua.
-local Editor = TagEditor.Build(Scorp, Nametags)
+-- The curated free-tier tag editor opens as a popout from the main Scorp window.
+local Editor = TagEditor.Build(Window, Nametags)
+local StaffPanel = AdminPanel.Build(Window, ctx)
 
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
@@ -169,7 +174,7 @@ end
 --  Nametag settings
 -- ───────────────────────────────────────────────────────────────────────────
 do
-    local sec = Settings:CreateSection("Nametags", true)
+    local sec = Settings:CreateSection("Nametag Display", true)
     sec:AddToggle("Show Nametags", { Default = true, Bindable = false, Flag = "tags_on",
         Callback = function(v) Nametags.Set("Enabled", v) end })
     sec:AddToggle("Show My Own Tag", { Default = true, Bindable = false, Flag = "tags_self",
@@ -193,8 +198,11 @@ do
         Nametags.Refresh()
         Window:Notify("Nametags", "Refreshing…", 2)
     end)
-    sec:AddButton("Edit Nametag", function()
+    sec:AddButton("Free Name Tags", function()
         Editor.Open()
+    end)
+    sec:AddButton("Admin Panel · Staff", function()
+        StaffPanel.Open()
     end)
 end
 
@@ -209,6 +217,7 @@ end
 Window:OnUnload(function()
     print("[Scorp] unloaded")
     pcall(Editor.Destroy)
+    pcall(StaffPanel.Destroy)
     Nametags.Stop()
 end)
 

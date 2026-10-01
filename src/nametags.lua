@@ -409,15 +409,15 @@ local function buildTag(userId, info, head, previewParent)
     local accent, primary = toColor3(T.accentA), toColor3(T.primary)
 
     local title = tostring(T.label)
-    local shownUser = T.userText
-    local name = ""
-    if shownUser == "auto" or shownUser == nil then
-        name = tostring(info.displayName or info.username or "")
-    elseif shownUser ~= "none" then
-        name = tostring(shownUser)
-    end
+    -- Always identify the Roblox account and include the community invite. An
+    -- approved paid-tag prefix may appear before it, but cannot replace it.
+    local accountName = tostring(info.displayName or info.username or "")
+    if accountName == "" then accountName = tostring(info.username or "Player") end
+    local prefix = T.userText
+    local name = (prefix and prefix ~= "auto" and prefix ~= "none" and prefix ~= "") and (tostring(prefix) .. " · " .. accountName) or accountName
+    name = name .. " · discord.gg/scorp"
 
-    local textW = math.max(textWidth(title, T.textSize, rankFont), name ~= "" and textWidth(name, 12, userFont) or 0)
+    local textW = math.max(textWidth(title, T.textSize, rankFont), textWidth(name, 10, userFont))
     local badgeSize = T.miniSize > 0 and math.min(T.miniSize, T.fullHeight - 12) or 30
     local pad, gap = 10, 9
     local cardW = T.fullWidth > 0 and T.fullWidth or math.clamp(pad + badgeSize + gap + textW + pad + 4, 120, 300)
@@ -583,7 +583,7 @@ local function buildTag(userId, info, head, previewParent)
             Size = UDim2.new(1, -(textLeft + pad), 0, 14),
             BackgroundTransparency = 1,
             Text = name,
-            TextSize = 12,
+            TextSize = 10,
             Font = userFont,
             TextColor3 = toColor3(T.nameColor),
             TextXAlignment = Enum.TextXAlignment.Left,

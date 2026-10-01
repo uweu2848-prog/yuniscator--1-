@@ -52,6 +52,7 @@ const CONFIG = {
     DISCORD_WEBHOOK: (env.DISCORD_WEBHOOK || '').trim(),
     WEBHOOK_STARTUP_PING: flag(env.WEBHOOK_STARTUP_PING, true),
     OWNER_USER_ID: String(env.OWNER_USER_ID || '').trim(),
+    ADMIN_ROBLOX_IDS: (env.ADMIN_ROBLOX_IDS || '').split(',').map(s => s.trim()).filter(s => /^\d{1,20}$/.test(s)),
     OWNER_KEY: env.OWNER_KEY || '',
     ADMIN_PASSWORD: env.ADMIN_PASSWORD || '',
     DISCORD_TOKEN: (env.DISCORD_TOKEN || '').trim(),
@@ -95,12 +96,16 @@ const CODE_INFO = {
     M1: [1, 'game __namecall/__index hooked with a Lua closure'],
     G1: [2, 'HTTP-spy style GUI found in CoreGui/gethui'],
     G2: [2, 'known spy global present in the environment'],
+        G3: [2, 'spy-like GUI found nested in CoreGui/gethui descendants'],
 };
 
 fs.mkdirSync(CONFIG.DATA_DIR, { recursive: true });
 const OFFENSES_FILE = path.join(CONFIG.DATA_DIR, 'offenses.json');
 const ROLES_FILE = path.join(CONFIG.DATA_DIR, 'roles.json');
 const TAGS_FILE = path.join(CONFIG.DATA_DIR, 'tags.json');
+const PAID_TAGS_FILE = path.join(CONFIG.DATA_DIR, 'paid-tags.json');
+const ACCESS_FILE = path.join(CONFIG.DATA_DIR, 'access.json');
+const ACCESS_HISTORY_FILE = path.join(CONFIG.DATA_DIR, 'access-history.json');
 const SECRET_FILE = path.join(CONFIG.DATA_DIR, 'session.key');
 const LIB_FILE = path.join(ROOT, 'src', 'ScorpLib.lua');
 const LOADER_FILE = path.join(ROOT, 'loader.lua');
@@ -176,6 +181,7 @@ function verifyToken(token) {
 }
 
 const ownerKeyOk = k => !!CONFIG.OWNER_KEY && typeof k === 'string' && k.length > 0 && safeEqual(k, CONFIG.OWNER_KEY);
+const panelAdminIds = new Set([CONFIG.OWNER_USER_ID, ...CONFIG.ADMIN_ROBLOX_IDS].filter(isDigits));
 
 // ────────────────────────────────────────────────────────────────────────────
 // Discord webhook — queued, rate-limit aware, and it tells you when it fails
@@ -194,7 +200,7 @@ function makeEmbed({ title, description, color, fields = [] }) {
             color,
             fields: fields.slice(0, 20).map(f => ({ name: clip(f.name, 250), value: clip(f.value || '—', 1000), inline: !!f.inline })),
             timestamp: new Date().toISOString(),
-            footer: { text: 'Scorp anti-tamper' },
+            footer: { text: 'Scorp · discord.gg/scorp' },
         }],
     };
 }
@@ -279,10 +285,14 @@ async function checkWebhookAtStartup() {
         alert({
             title: '✅ Scorp server online',
             color: 0x2ecc71,
+            description: 'Backend health check passed. Use the access controls and recent history commands in Discord to review accounts and tag entitlements. · discord.gg/scorp',
             fields: [
-                { name: 'Payload build', value: `\`${b ? b.id : 'none'}\``, inline: true },
-                { name: 'Auto-ban', value: CONFIG.AUTO_BAN ? 'on' : 'off (alerts only)', inline: true },
-                { name: 'Owner key', value: CONFIG.OWNER_KEY ? 'set' : 'NOT SET', inline: true },
+                { name: 'Payload build', value: `\`${b ? b.id : 'none'}\` · ${b ? `${(b.bytes / 1024).toFixed(1)} KB` : 'unavailable'}`, inline: true },
+                { name: 'Runtime', value: `Node ${process.version} · ${process.platform}`, inline: true },
+                { name: 'Enforcement', value: CONFIG.AUTO_BAN ? `automatic · score ${CONFIG.BAN_SCORE} · ${CONFIG.AUTO_BAN_THRESHOLD} strikes` : 'alerts only', inline: true },
+                { name: 'Owner exemption', value: CONFIG.OWNER_KEY ? 'configured' : 'NOT CONFIGURED', inline: true },
+                { name: 'Moderation', value: `${Object.keys(access.allowlist).length} allowlisted · ${accessHistory.length} audit events`, inline: true },
+                { name: 'Data store', value: `\`${path.basename(CONFIG.DATA_DIR)}\` · persistent`, inline: true },
             ],
         });
     }
@@ -349,6 +359,35 @@ let groups = {};
     else writeJsonAtomic(OFFENSES_FILE, { parent, groups });
 }
 const saveOffenses = () => writeJsonAtomic(OFFENSES_FILE, { parent, groups });
+
+let access = readJson(ACCESS_FILE, { allowlist: {} });
+if (!access || typeof access !== 'object' || Array.isArray(access)) access = { allowlist: {} };
+if (!access.allowlist || typeof access.allowlist !== 'object' || Array.isArray(access.allowlist)) access.allowlist = {};
+const saveAccess = () => writeJsonAtomic(ACCESS_FILE, access);
+
+let accessHistory = readJson(ACCESS_HISTORY_FILE, []);
+if (!Array.isArray(accessHistory)) accessHistory = [];
+function recordAccessEvent(action, details = {}) {
+    accessHistory.push({ action, at: new Date().toISOString(), ...details });
+    if (accessHistory.length > 2000) accessHistory = accessHistory.slice(-2000);
+    writeJsonAtomic(ACCESS_HISTORY_FILE, accessHistory);
+}
+
+function setAllowlisted(userId, allowed, reason = '', actor = 'admin') {
+    userId = String(userId || '');
+    if (!isDigits(userId)) throw new Error('userId must be numeric.');
+    if (allowed) {
+        access.allowlist[userId] = { reason: cleanStr(reason, 300) || 'Approved by staff', actor: cleanStr(actor, 80), addedAt: new Date().toISOString() };
+    } else {
+        if (!access.allowlist[userId]) return false;
+        delete access.allowlist[userId];
+    }
+    saveAccess();
+    recordAccessEvent(allowed ? 'allowlist_add' : 'allowlist_remove', { userId, reason: cleanStr(reason, 300), actor: cleanStr(actor, 80) });
+    return true;
+}
+
+function allowlistHas(userId) { return !!access.allowlist[String(userId)]; }
 
 function find(id) {
     if (!(id in parent)) parent[id] = id;
@@ -438,6 +477,23 @@ for (const [id, v] of Object.entries(readJson(TAGS_FILE, {}))) {
 }
 const saveTags = () => writeJsonAtomic(TAGS_FILE, tags);
 
+let paidTags = readJson(PAID_TAGS_FILE, {});
+if (!paidTags || typeof paidTags !== 'object' || Array.isArray(paidTags)) paidTags = {};
+const savePaidTags = () => writeJsonAtomic(PAID_TAGS_FILE, paidTags);
+
+function setPaidTagTier(userId, enabled, reason = '', actor = 'admin') {
+    userId = String(userId || '');
+    if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+    if (enabled) {
+        paidTags[userId] = { enabled: true, reason: cleanStr(reason, 300) || 'Custom tag approved by staff', actor: cleanStr(actor, 80) || 'admin', updatedAt: new Date().toISOString() };
+    } else {
+        delete paidTags[userId];
+    }
+    savePaidTags();
+    recordAccessEvent(enabled ? 'premium_tag_grant' : 'premium_tag_revoke', { userId, reason: cleanStr(reason, 300), actor: cleanStr(actor, 80) || 'admin' });
+    return paidTags[userId] || null;
+}
+
 /** What the Discord embed / admin API show: role, label and the fully resolved design. */
 function tagInfo(userId) {
     userId = String(userId);
@@ -447,6 +503,8 @@ function tagInfo(userId) {
         userId,
         role: r.role,
         roleLabel: r.label,
+        tier: paidTags[userId] && paidTags[userId].enabled ? 'premium' : 'free',
+        paidTag: paidTags[userId] || null,
         hasCustomTag: Object.keys(overrides).length > 0,
         overrides,
         effective: tagconfig.effectiveTag(r.role, overrides, r.label),
@@ -524,12 +582,76 @@ function applyPreset(userId, name) {
     return commitTag(userId, { ...((tags[userId] && tags[userId].overrides) || {}), ...tagconfig.presetOverrides(name) });
 }
 
+/** Apply only the three curated selections exposed by the free self-service editor. */
+function applyFreeTagPresets(userId, selections) {
+    userId = String(userId);
+    if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+    if (paidTags[userId] && paidTags[userId].enabled) throw new tagconfig.TagError('This account has a staff-managed premium tag. Contact Scorp staff for changes.');
+    if (!selections || typeof selections !== 'object' || Array.isArray(selections)) {
+        throw new tagconfig.TagError('Choose a color, font, and effect preset.');
+    }
+    const expected = ['colorPreset', 'fontPreset', 'effectPreset'];
+    if (Object.keys(selections).length !== expected.length || expected.some(k => !Object.prototype.hasOwnProperty.call(selections, k))) {
+        throw new tagconfig.TagError('Free designs require exactly one color, font, and effect preset.');
+    }
+    const matchName = (raw, names, label) => {
+        const key = names.find(n => n.toLowerCase() === String(raw || '').trim().toLowerCase());
+        if (!key) throw new tagconfig.TagError(`Choose a listed ${label} preset.`);
+        return key;
+    };
+    const colorName = matchName(selections.colorPreset, tagconfig.PRESET_NAMES, 'color');
+    const fontName = matchName(selections.fontPreset, tagconfig.FREE_FONT_PRESET_ORDER, 'font');
+    const effectName = matchName(selections.effectPreset, tagconfig.FREE_EFFECT_PRESET_ORDER, 'effect');
+    const next = {};
+    const addDifferences = values => {
+        for (const [key, value] of Object.entries(values)) if (value !== tagconfig.DEFAULTS[key]) next[key] = value;
+    };
+    addDifferences(tagconfig.presetOverrides(colorName));
+    addDifferences(tagconfig.FREE_FONT_PRESETS[fontName]);
+    addDifferences(tagconfig.FREE_EFFECT_PRESETS[effectName]);
+    return commitTag(userId, next);
+}
+
 /** The public part of a player's tag that goes to other clients: role, label and only the changed options. */
 function publicTagFor(userId) {
     const r = roleFor(userId);
-    const overrides = tags[String(userId)] && tags[String(userId)].overrides;
-    const out = { role: r.role, label: (overrides && overrides.label) || r.label };
-    if (overrides && Object.keys(overrides).length) out.tag = overrides;
+    const id = String(userId);
+    const overrides = tags[id] && tags[id].overrides;
+    const isPremium = !!(paidTags[id] && paidTags[id].enabled);
+    const out = { role: r.role, label: (isPremium && overrides && overrides.label) || r.label };
+    if (overrides && isPremium) out.tag = overrides;
+    else if (overrides) {
+        const free = {};
+        const effective = tagconfig.effectiveTag(r.role, overrides, r.label);
+        const roleDefault = tagconfig.effectiveTag(r.role, {}, r.label);
+
+        // A free account only gets whole known presets, never arbitrary color values.
+        for (const presetName of tagconfig.PRESET_NAMES) {
+            const palette = tagconfig.presetOverrides(presetName);
+            if (tagconfig.COLOR_KEYS.every(key => effective[key] === palette[key])) {
+                for (const key of tagconfig.COLOR_KEYS) if (palette[key] !== roleDefault[key]) free[key] = palette[key];
+                break;
+            }
+        }
+
+        for (const presetName of tagconfig.FREE_FONT_PRESET_ORDER) {
+            const fontPreset = tagconfig.FREE_FONT_PRESETS[presetName];
+            if (effective.rankFont === fontPreset.rankFont && effective.userFont === fontPreset.userFont) {
+                for (const key of ['rankFont', 'userFont']) if (fontPreset[key] !== tagconfig.DEFAULTS[key]) free[key] = fontPreset[key];
+                break;
+            }
+        }
+
+        for (const presetName of tagconfig.FREE_EFFECT_PRESET_ORDER) {
+            const effectPreset = tagconfig.FREE_EFFECT_PRESETS[presetName];
+            const keys = ['textAnimation', ...tagconfig.EFFECT_KEYS];
+            if (keys.every(key => effective[key] === effectPreset[key])) {
+                for (const key of keys) if (effectPreset[key] !== tagconfig.DEFAULTS[key]) free[key] = effectPreset[key];
+                break;
+            }
+        }
+        if (Object.keys(free).length) out.tag = free;
+    }
     return out;
 }
 
@@ -576,6 +698,22 @@ function sanitizeCodes(codes) {
 }
 function scoreCodes(codes) { return codes.reduce((s, c) => s + (CODE_INFO[c] ? CODE_INFO[c][0] : 1), 0); }
 
+function alertIdentityFields(who) {
+    const session = issued.get(who.nonce) || {};
+    const value = v => `\`${cleanStr(v || 'Unknown', 180)}\``;
+    const b = getBuild();
+    return [
+        { name: 'Roblox account', value: `${value(who.username)} · ${value(who.userId)}`, inline: true },
+        { name: 'Role / access', value: `${roleFor(who.userId).role} · ${allowlistHas(who.userId) ? 'allowlisted' : 'standard'}`, inline: true },
+        { name: 'Executor / platform', value: `${value(session.executor || who.executor)} · ${value(session.platform || who.platform)}`, inline: true },
+        { name: 'Place / server', value: `${value(session.placeId || who.placeId)} · ${value(session.jobId || who.jobId)}`, inline: false },
+        { name: 'Session', value: `${value(who.nonce)} · ${session.confirmed ? 'confirmed' : 'not confirmed'}`, inline: false },
+        { name: 'HWID', value: value(who.hwid), inline: true },
+        { name: 'IP', value: value(who.ip), inline: true },
+        { name: 'Build', value: value(session.buildId || (b && b.id)), inline: true },
+    ];
+}
+
 function applyBan(root, who, reason) {
     const g = groups[root] || { offenseCount: 0, bannedUntil: null, permanent: false, reasons: [] };
     g.offenseCount += 1;
@@ -585,18 +723,16 @@ function applyBan(root, who, reason) {
     g.reasons.push({ username: who.username || 'Unknown', userId: who.userId || null, hwid: who.hwid || null, ip: who.ip || null, reason, date: new Date().toISOString() });
     groups[root] = g;
     saveOffenses();
+    recordAccessEvent('auto_blacklist', {
+        userId: who.userId || null, username: who.username || 'Unknown', hwid: who.hwid || null,
+        reason: cleanStr(reason, 500), permanent: g.permanent, bannedUntil: g.bannedUntil,
+    });
     strikes.delete(root);
     const label = g.permanent ? 'PERMANENT' : TIER_LABEL[tier] || `${tier}ms`;
     alert({
         title: `🚨 Offense #${g.offenseCount} — banned (${label})`,
         color: 0xe74c3c,
-        fields: [
-            { name: 'Username', value: `\`${who.username || 'Unknown'}\``, inline: true },
-            { name: 'User ID', value: `\`${who.userId || 'Unknown'}\``, inline: true },
-            { name: 'HWID', value: `\`${who.hwid || 'Unknown'}\`` },
-            { name: 'IP', value: `\`${who.ip || 'Unknown'}\`` },
-            { name: 'Reason', value: reason },
-        ],
+        fields: [...alertIdentityFields(who), { name: 'Blacklist reason', value: reason }],
     });
 }
 
@@ -610,6 +746,22 @@ function handleFlags(who, rawCodes, source) {
 
     if (who.ownerOk) {
         log(`[tamper] owner-verified session flagged ${codes.join(',')} (ignored)`);
+        return false;
+    }
+
+    if (allowlistHas(who.userId)) {
+        if (!throttled(`allowlisted:${who.userId}:${codes.join(',')}`, 10 * 60 * 1000)) {
+            alert({
+                title: `🛡️ Tamper signal reviewed — allowlisted (${source})`,
+                color: 0x3498db,
+                description: 'Signals are recorded for review, but automatic enforcement is skipped for this allowlisted account. Existing manual/automatic blacklists still apply.',
+                fields: [...alertIdentityFields(who),
+                    { name: 'Signal score', value: String(scoreCodes(codes)), inline: true },
+                    { name: 'Detection codes', value: codes.map(c => `**${c}** — ${CODE_INFO[c] ? CODE_INFO[c][1] : 'unknown check'}`).join('\n') },
+                    { name: 'Allowlist note', value: access.allowlist[String(who.userId)].reason || 'Approved by staff' },
+                ],
+            });
+        }
         return false;
     }
 
@@ -634,12 +786,9 @@ function handleFlags(who, rawCodes, source) {
             title: `⚠️ Tamper signal (${source})`,
             color: 0xf39c12,
             fields: [
-                { name: 'Username', value: `\`${who.username || 'Unknown'}\``, inline: true },
-                { name: 'User ID', value: `\`${who.userId || 'Unknown'}\``, inline: true },
+                ...alertIdentityFields(who),
                 { name: 'Score', value: String(score), inline: true },
                 { name: 'Codes', value: codes.map(c => `**${c}** — ${CODE_INFO[c] ? CODE_INFO[c][1] : 'unknown check'}`).join('\n') },
-                { name: 'HWID', value: `\`${who.hwid || 'Unknown'}\`` },
-                { name: 'IP', value: `\`${who.ip || 'Unknown'}\``, inline: true },
                 { name: 'Action', value: action, inline: true },
             ],
         });
@@ -654,15 +803,14 @@ setInterval(() => {
         if (t - s.issuedAt > 10 * 60 * 1000) { pushHistory(s); issued.delete(nonce); continue; }
         if (!s.confirmed && !s.alerted && !s.ownerOk && t - s.issuedAt > CONFIG.UNCONFIRMED_AFTER_MS) {
             s.alerted = true;
+            const who = { ...s, nonce, ownerOk: false };
             alert({
                 title: '📦 Payload fetched but never confirmed',
                 color: 0xf1c40f,
-                description: 'The loader normally checks in within seconds. This session never did — the payload may have been downloaded by hand (curl/dumper) or the heartbeat was blocked.',
+                description: 'No authenticated heartbeat arrived before the confirmation window expired. This can indicate a blocked connection or an incomplete session; it is a review signal, not proof of tampering. · discord.gg/scorp',
                 fields: [
-                    { name: 'Username', value: `\`${s.username}\``, inline: true },
-                    { name: 'User ID', value: `\`${s.userId}\``, inline: true },
-                    { name: 'IP', value: `\`${s.ip}\``, inline: true },
-                    { name: 'HWID', value: `\`${s.hwid}\`` },
+                    ...alertIdentityFields(who),
+                    { name: 'Age', value: `${Math.round((t - s.issuedAt) / 1000)} seconds`, inline: true },
                 ],
             });
         }
@@ -702,6 +850,7 @@ function publicBase(req) {
 }
 
 function whoFromToken(req, claims) {
+    const issuedSession = issued.get(claims.n) || {};
     return {
         userId: claims.u,
         username: claims.nm,
@@ -709,6 +858,10 @@ function whoFromToken(req, claims) {
         ip: clientIp(req),
         nonce: claims.n,
         ownerOk: !!claims.ok,
+        executor: issuedSession.executor || 'Unknown',
+        platform: issuedSession.platform || 'Unknown',
+        jobId: issuedSession.jobId || 'Unknown',
+        placeId: issuedSession.placeId || 'Unknown',
     };
 }
 
@@ -724,6 +877,13 @@ function requireToken(req, res, next) {
     }
     const s = issued.get(claims.n);
     if (s) s.confirmed = true;
+    next();
+}
+
+function requirePanelAdmin(req, res, next) {
+    if (!req.claims || !panelAdminIds.has(String(req.claims.u))) {
+        return res.status(403).json({ ok: false, error: 'This Roblox account is not authorized for the Scorp admin panel.' });
+    }
     next();
 }
 
@@ -757,9 +917,11 @@ app.post('/api/session', sessionLimiter, (req, res) => {
     const hwid = cleanStr(b.hwid, 200) || 'UNKNOWN_HWID';
     const executor = cleanStr(b.executor, 80) || 'Unknown';
     const platform = cleanStr(b.platform, 20) || 'Unknown';
+    const jobId = cleanStr(b.jobId, 64) || 'Unknown';
+    const placeId = cleanStr(b.placeId, 20) || 'Unknown';
     const ip = clientIp(req);
     const ownerOk = ownerKeyOk(b.ownerKey);
-    const who = { userId, username, hwid, ip, ownerOk, nonce: null };
+    const who = { userId, username, hwid, ip, ownerOk, nonce: null, executor, platform, jobId, placeId };
 
     trackIpCorrelation(userId, hwid, ip);
 
@@ -783,7 +945,7 @@ app.post('/api/session', sessionLimiter, (req, res) => {
 
     const claims = { v: 1, n: nonce, u: userId, nm: username, h: hwid, iat: now(), exp: now() + CONFIG.TOKEN_TTL_MS, ok: ownerOk ? 1 : 0 };
     const token = signToken(claims);
-    issued.set(nonce, { userId, username, hwid, ip, executor, platform, issuedAt: now(), confirmed: !!b.resume, alerted: false, ownerOk });
+    issued.set(nonce, { userId, username, hwid, ip, executor, platform, jobId, placeId, buildId: (getBuild() || {}).id || null, issuedAt: now(), confirmed: !!b.resume, alerted: false, ownerOk });
 
     if (b.resume) return res.json({ ok: true, token, hb: CONFIG.HEARTBEAT_SECONDS });
 
@@ -791,15 +953,12 @@ app.post('/api/session', sessionLimiter, (req, res) => {
     // this session. Optional — off by default so you're not pinged on every single join.
     if (CONFIG.JOIN_ALERTS) {
         alert({
-            title: '🟢 Script executed',
+            title: '🟢 Scorp session started',
             color: 0x2ecc71,
+            description: 'A new session was issued. · discord.gg/scorp',
             fields: [
-                { name: 'Username', value: `\`${username}\``, inline: true },
-                { name: 'User ID', value: `\`${userId}\``, inline: true },
-                { name: 'Owner', value: ownerOk ? 'Yes' : 'No', inline: true },
-                { name: 'Executor', value: `\`${executor}\``, inline: true },
-                { name: 'Platform', value: `\`${platform}\``, inline: true },
-                { name: 'IP', value: `\`${ip}\``, inline: true },
+                ...alertIdentityFields({ ...who, nonce }),
+                { name: 'Owner-key session', value: ownerOk ? 'verified' : 'standard', inline: true },
             ],
         });
     }
@@ -850,11 +1009,11 @@ app.post('/api/nametags/leave', requireToken, (req, res) => {
     res.json({ ok: true });
 });
 
-// ── Standalone web tag editor (mois7-style) ──────────────────────────────────
-// The in-game button never lands you on the embedded editor tab anymore — it mints a
-// short-lived link (below) that the client copies to the clipboard, and the actual
-// editing happens in a real browser tab at GET /tag, talking ONLY to /api/tag-session/:code.
-// The code carries just enough auth to touch that one player's tag — never the admin key.
+// ── Self-service free tag editor ────────────────────────────────────────────
+// The in-game flow mints a short-lived link to GET /tag. This editor and its
+// session API accept only named free presets; admin/Discord tools retain the
+// full design controls. The link carries just enough auth for that player —
+// never the admin key.
 const editorCodes = new Map(); // code -> { userId, username, expiresAt }
 const EDITOR_LINK_TTL_MS = 15 * 60 * 1000;
 
@@ -889,34 +1048,39 @@ app.get('/api/tag-session/:code', requireEditorCode, (req, res) => {
         ok: true,
         username: req.editorUsername,
         options: {
-            groups: tagconfig.GROUPS, composites: tagconfig.COMPOSITES, types: tagconfig.TYPES, fonts: tagconfig.FONTS,
-            animations: tagconfig.ANIMATIONS, defaults: tagconfig.DEFAULTS, rolePresets: tagconfig.ROLE_PRESETS,
-            colorPresets: tagconfig.PRESET_NAMES, ranges: tagconfig.RANGES,
+            defaults: tagconfig.DEFAULTS, rolePresets: tagconfig.ROLE_PRESETS, colorKeys: tagconfig.COLOR_KEYS,
+            colorPresets: tagconfig.PRESET_NAMES, colorPresetValues: tagconfig.COLOR_PRESETS,
+            freeFontPresets: tagconfig.FREE_FONT_PRESETS, freeFontPresetOrder: tagconfig.FREE_FONT_PRESET_ORDER,
+            freeEffectPresets: tagconfig.FREE_EFFECT_PRESETS, freeEffectPresetOrder: tagconfig.FREE_EFFECT_PRESET_ORDER,
         },
         tag: tagInfo(req.editorUserId),
     });
 });
 app.put('/api/tag-session/:code', requireEditorCode, (req, res) => {
-    try { res.json({ ok: true, tag: setTagOptions(req.editorUserId, req.body) }); }
+    try { res.json({ ok: true, tag: applyFreeTagPresets(req.editorUserId, req.body) }); }
     catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 app.delete('/api/tag-session/:code', requireEditorCode, (req, res) => {
-    try { res.json({ ok: true, tag: resetTag(req.editorUserId, req.query.option ? String(req.query.option) : undefined) }); }
+    try {
+        if (paidTags[req.editorUserId] && paidTags[req.editorUserId].enabled) throw new tagconfig.TagError('This account has a staff-managed premium tag. Contact Scorp staff for changes.');
+        res.json({ ok: true, tag: resetTag(req.editorUserId, req.query.option ? String(req.query.option) : undefined) });
+    }
     catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 app.post('/api/tag-session/:code/preset', requireEditorCode, (req, res) => {
-    try { res.json({ ok: true, tag: applyPreset(req.editorUserId, (req.body || {}).name) }); }
+    try {
+        res.json({ ok: true, tag: applyFreeTagPresets(req.editorUserId, {
+            colorPreset: (req.body || {}).name,
+            fontPreset: 'Classic',
+            effectPreset: 'Classic Glow',
+        }) });
+    }
     catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 app.get('/api/tag-session/:code/export', requireEditorCode, (req, res) => {
     try { res.json({ ok: true, ...exportTag(req.editorUserId) }); }
     catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
-app.post('/api/tag-session/:code/import', requireEditorCode, (req, res) => {
-    try { const b = req.body || {}; res.json({ ok: true, ...importTag(req.editorUserId, b.code, b.mode) }); }
-    catch (e) { res.status(400).json({ ok: false, error: e.message }); }
-});
-
 // ── Admin ───────────────────────────────────────────────────────────────────
 const adminLimiter = rateLimit({ windowMs: 60_000, max: num(env.ADMIN_RATE_PER_MIN, 30), name: 'admin' }); // per IP; raise it if you script the admin API
 function requireAdmin(req, res, next) {
@@ -1015,33 +1179,182 @@ app.get('/api/admin/suspicious', (_req, res) => {
     res.json({ total: flagged.length, flagged });
 });
 
-app.post('/api/admin/blacklist', (req, res) => {
-    const { userId, hwid, ip, username, reason, permanent } = req.body || {};
-    if (!userId && !hwid) return res.status(400).json({ error: 'Must provide userId and/or hwid (IPs are not banned: too many people share one)' });
-    const root = linkIdentity(userId ? String(userId) : null, hwid || null);
+function blacklistIdentity({ userId, hwid, username, reason, permanent, actor = 'admin' }) {
+    userId = userId == null ? '' : String(userId);
+    hwid = cleanStr(hwid, 200);
+    if ((!userId || !isDigits(userId)) && !hwid) throw new Error('Provide a numeric userId and/or HWID. IP-only blacklisting is disabled.');
+    const root = linkIdentity(userId && isDigits(userId) ? userId : null, hwid || null);
+    if (!root) throw new Error('Could not resolve a blacklist identity.');
     const g = groups[root] || { offenseCount: 0, bannedUntil: null, permanent: false, reasons: [] };
     g.offenseCount += 1;
-    g.permanent = !!permanent;
-    g.bannedUntil = permanent ? null : now() + BAN_TIERS[Math.min(g.offenseCount - 1, BAN_TIERS.length - 1)];
-    g.reasons.push({ username: username || 'Manual Entry', userId: userId || null, hwid: hwid || null, ip: ip || null, reason: reason || 'Manual administrator ban', date: new Date().toISOString() });
+    const forever = permanent === true;
+    const tier = BAN_TIERS[Math.min(g.offenseCount - 1, BAN_TIERS.length - 1)];
+    g.permanent = forever || tier === null;
+    g.bannedUntil = g.permanent ? null : now() + tier;
+    const cleanReason = cleanStr(reason, 500) || 'Manual staff blacklist';
+    const entry = {
+        username: cleanStr(username, 80) || 'Manual Entry',
+        userId: userId && isDigits(userId) ? userId : null,
+        hwid: hwid || null,
+        ip: null,
+        reason: cleanReason,
+        source: 'manual',
+        actor: cleanStr(actor, 80) || 'admin',
+        date: new Date().toISOString(),
+    };
+    g.reasons.push(entry);
+    g.reasons = g.reasons.slice(-30);
     groups[root] = g;
     saveOffenses();
-    res.json({ success: true, entry: banInfo(root) });
+    recordAccessEvent('manual_blacklist', { ...entry, permanent: g.permanent, bannedUntil: g.bannedUntil });
+    return { root, ...banInfo(root), latestReason: entry };
+}
+
+function unblacklistIdentity(target, actor = 'admin') {
+    target = String(target || '').trim();
+    if (!target) throw new Error('Missing target (userId or HWID).');
+    const candidates = [`uid:${target}`, `hwid:${target}`].filter(id => id in parent);
+    if (!candidates.length) return false;
+    const root = find(candidates[0]);
+    const g = groups[root];
+    if (!g) return false;
+    g.permanent = false;
+    g.bannedUntil = null;
+    strikes.delete(root);
+    saveOffenses();
+    recordAccessEvent('blacklist_remove', { target, root, actor: cleanStr(actor, 80) || 'admin' });
+    return true;
+}
+
+function editBlacklistReason(target, reason, actor = 'admin') {
+    target = String(target || '').trim();
+    reason = cleanStr(reason, 500);
+    if (!target || !reason) throw new Error('Provide a target and a non-empty reason (max 500 characters).');
+    const candidates = [`uid:${target}`, `hwid:${target}`].filter(id => id in parent);
+    if (!candidates.length) return false;
+    const root = find(candidates[0]);
+    const g = groups[root];
+    const last = g && g.reasons && g.reasons[g.reasons.length - 1];
+    if (!last) return false;
+    const previousReason = last.reason || '';
+    last.reason = reason;
+    last.reasonEditedAt = new Date().toISOString();
+    last.reasonEditedBy = cleanStr(actor, 80) || 'admin';
+    saveOffenses();
+    recordAccessEvent('blacklist_reason_edit', { target, root, previousReason, reason, actor: last.reasonEditedBy });
+    return { root, reason };
+}
+
+function moderationSnapshot() {
+    const blacklisted = Object.keys(groups).map(root => ({
+        identities: Object.keys(parent).filter(id => find(id) === root),
+        ...banInfo(root),
+        latestReason: (groups[root].reasons || []).slice(-1)[0] || null,
+    }));
+    const allowlisted = Object.entries(access.allowlist).map(([userId, value]) => ({ userId, ...value }));
+    return { blacklisted, allowlisted };
+}
+
+app.post('/api/admin/blacklist', (req, res) => {
+    try { res.json({ success: true, entry: blacklistIdentity(req.body || {}) }); }
+    catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.post('/api/admin/unblacklist', (req, res) => {
-    const target = String((req.body || {}).target || '');
-    if (!target) return res.status(400).json({ error: 'Missing target (userId or hwid)' });
-    const candidates = [`uid:${target}`, `hwid:${target}`].filter(id => id in parent);
-    if (!candidates.length) return res.status(404).json({ success: false, message: `Target ${target} not found.` });
-    const root = find(candidates[0]);
-    if (groups[root]) {
-        groups[root].permanent = false;
-        groups[root].bannedUntil = null;
-        strikes.delete(root);
-        saveOffenses();
-    }
-    res.json({ success: true, message: `Lifted ban for ${target}` });
+    try {
+        const target = String((req.body || {}).target || '');
+        if (!unblacklistIdentity(target)) return res.status(404).json({ success: false, message: `Active blacklist not found for ${target || 'target'}.` });
+        res.json({ success: true, message: `Lifted blacklist for ${target}` });
+    } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/admin/access', (_req, res) => res.json(moderationSnapshot()));
+app.get('/api/admin/access/history', (req, res) => {
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 100, 500));
+    res.json({ total: accessHistory.length, events: accessHistory.slice(-limit).reverse() });
+});
+app.get('/api/admin/overview', (_req, res) => {
+    const t = now();
+    res.json({
+        ok: true,
+        service: 'Scorp',
+        build: getBuild() && { id: getBuild().id, builtAt: getBuild().builtAt, bytes: getBuild().bytes },
+        uptimeSeconds: Math.round(process.uptime()),
+        enforcement: { automatic: CONFIG.AUTO_BAN, banScore: CONFIG.BAN_SCORE, strikeThreshold: CONFIG.AUTO_BAN_THRESHOLD, strikeScore: CONFIG.STRIKE_SCORE },
+        webhook: { configured: !!CONFIG.DISCORD_WEBHOOK, sent: webhook.sent, failed: webhook.failed, lastError: webhook.lastError, lastOkAt: webhook.lastOkAt },
+        usersOnline: [...presence.values()].filter(p => t - p.lastSeen <= CONFIG.PRESENCE_TTL_MS).length,
+        sessions: { tracked: issued.size, unconfirmed: [...issued.values()].filter(s => !s.confirmed).length },
+        moderation: { ...moderationSnapshot(), recentEvents: accessHistory.slice(-10).reverse() },
+        paidTags: Object.keys(paidTags).length,
+    });
+});
+app.put('/api/admin/access/allowlist/:userId', (req, res) => {
+    try {
+        const userId = req.params.userId;
+        setAllowlisted(userId, req.body && req.body.allowed !== false, req.body && req.body.reason, req.body && req.body.actor);
+        res.json({ success: true, userId, allowlisted: allowlistHas(userId), entry: access.allowlist[userId] || null });
+    } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+app.put('/api/admin/blacklist/reason', (req, res) => {
+    try {
+        const result = editBlacklistReason(req.body && req.body.target, req.body && req.body.reason, req.body && req.body.actor);
+        if (!result) return res.status(404).json({ success: false, error: 'Blacklist entry not found.' });
+        res.json({ success: true, ...result });
+    } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+
+// In-game admin panel API. Authentication requires a valid session AND a server-configured
+// Roblox admin ID; a client-side UI flag alone can never authorize a request.
+app.get('/api/panel/overview', requireToken, requirePanelAdmin, (_req, res) => {
+    const t = now();
+    res.json({
+        ok: true,
+        service: 'Scorp',
+        build: getBuild() && { id: getBuild().id, builtAt: getBuild().builtAt },
+        usersOnline: [...presence.values()].filter(p => t - p.lastSeen <= CONFIG.PRESENCE_TTL_MS).length,
+        sessions: { tracked: issued.size, unconfirmed: [...issued.values()].filter(s => !s.confirmed).length },
+        access: moderationSnapshot(),
+        history: accessHistory.slice(-25).reverse(),
+        paidTags: Object.entries(paidTags).filter(([, v]) => v && v.enabled).map(([userId, value]) => ({ userId, ...value })),
+        tagCount: Object.keys(tags).length,
+        webhook: { configured: !!CONFIG.DISCORD_WEBHOOK, sent: webhook.sent, failed: webhook.failed },
+    });
+});
+
+app.post('/api/panel/blacklist', requireToken, requirePanelAdmin, (req, res) => {
+    try { res.json({ ok: true, entry: blacklistIdentity({ ...(req.body || {}), actor: req.who.userId }) }); }
+    catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/api/panel/unblacklist', requireToken, requirePanelAdmin, (req, res) => {
+    try {
+        const target = req.body && req.body.target;
+        if (!unblacklistIdentity(target, req.who.userId)) return res.status(404).json({ ok: false, error: 'Active blacklist not found.' });
+        res.json({ ok: true });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/api/panel/allowlist', requireToken, requirePanelAdmin, (req, res) => {
+    try {
+        const b = req.body || {};
+        const changed = setAllowlisted(b.userId, b.allowed === true, b.reason, req.who.userId);
+        res.json({ ok: true, changed, allowlisted: allowlistHas(b.userId) });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/api/panel/blacklist/reason', requireToken, requirePanelAdmin, (req, res) => {
+    try {
+        const result = editBlacklistReason(req.body && req.body.target, req.body && req.body.reason, req.who.userId);
+        if (!result) return res.status(404).json({ ok: false, error: 'Blacklist entry not found.' });
+        res.json({ ok: true, ...result });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/api/panel/tag', requireToken, requirePanelAdmin, (req, res) => {
+    try {
+        const b = req.body || {};
+        const userId = String(b.userId || '');
+        if (b.tier === 'premium') setPaidTagTier(userId, true, b.reason || 'In-game admin panel', req.who.userId);
+        else if (b.tier === 'free') setPaidTagTier(userId, false, b.reason || 'In-game admin panel', req.who.userId);
+        if (b.options && typeof b.options === 'object' && !Array.isArray(b.options)) setTagOptions(userId, b.options);
+        res.json({ ok: true, tag: tagInfo(userId) });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // Shared by the HTTP admin routes below AND the optional Discord bot (src/discord-bot.js),
@@ -1099,6 +1412,14 @@ app.get('/api/admin/tags/options', (_req, res) => res.json({
 app.get('/api/admin/tags/:userId', (req, res) => {
     if (!isDigits(req.params.userId)) return res.status(400).json({ error: 'bad userId' });
     res.json(tagInfo(req.params.userId));
+});
+app.put('/api/admin/tags/:userId/tier', (req, res) => {
+    try {
+        const enabled = (req.body || {}).tier === 'premium';
+        if (!enabled && (req.body || {}).tier !== 'free') return res.status(400).json({ error: 'tier must be free or premium' });
+        const premiumTag = setPaidTagTier(req.params.userId, enabled, (req.body || {}).reason, (req.body || {}).actor);
+        res.json({ success: true, tier: enabled ? 'premium' : 'free', premiumTag, tag: tagInfo(req.params.userId) });
+    } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.put('/api/admin/tags/:userId', (req, res) => {
     try {
@@ -1179,7 +1500,24 @@ function startDiscordBotIfConfigured() {
             setRole,
             clearRole,
             getRoles: () => roles,
-            tags: { info: tagInfo, set: setTagOptions, reset: resetTag, copy: copyTag, list: () => tags, import: importTag, export: exportTag, preset: applyPreset },
+            tags: {
+                info: tagInfo, set: setTagOptions, reset: resetTag, copy: copyTag, list: () => tags,
+                import: importTag, export: exportTag, preset: applyPreset,
+                tier: (userId, tier, reason, actor) => {
+                    if (tier !== 'free' && tier !== 'premium') throw new tagconfig.TagError('tier must be free or premium');
+                    setPaidTagTier(userId, tier === 'premium', reason, actor);
+                    return tagInfo(userId);
+                },
+            },
+            access: {
+                blacklist: blacklistIdentity,
+                unblacklist: unblacklistIdentity,
+                allow: (userId, reason, actor) => setAllowlisted(userId, true, reason, actor),
+                unallow: (userId, actor) => setAllowlisted(userId, false, '', actor),
+                editReason: editBlacklistReason,
+                snapshot: moderationSnapshot,
+                history: limit => ({ total: accessHistory.length, events: accessHistory.slice(-Math.max(1, Math.min(Number(limit) || 100, 500))).reverse() }),
+            },
             publicUrl: CONFIG.PUBLIC_URL,
             log,
         });

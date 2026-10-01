@@ -7,7 +7,7 @@
  */
 const assert = require('assert');
 const tagconfig = require('../src/tagconfig');
-const { createHandler, buildCommands } = require('../src/discord-bot');
+const { createHandler, buildCommands, buildPanelComponents, buildPanelModal } = require('../src/discord-bot');
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -93,21 +93,36 @@ function testTagconfig() {
     let presetThrew = false; try { tagconfig.presetOverrides('nope'); } catch (e) { presetThrew = e instanceof tagconfig.TagError; }
     ok(presetThrew, 'unknown preset gives a readable error');
 
+    ok(tagconfig.FREE_FONT_PRESET_ORDER.length >= 6, 'free editor offers multiple curated font styles');
+    for (const [name, preset] of Object.entries(tagconfig.FREE_FONT_PRESETS)) {
+        ok(tagconfig.FONTS.includes(preset.rankFont) && tagconfig.FONTS.includes(preset.userFont), `free font style "${name}" only uses supported fonts`);
+    }
+    ok(tagconfig.FREE_EFFECT_PRESETS['Rainbow Fade'].textAnimation === 'rainbow', 'free rainbow pack uses the animated rainbow renderer');
+    ok(tagconfig.FREE_EFFECT_PRESETS['Glitch Pop'].glitch && tagconfig.FREE_EFFECT_PRESETS['Glitch Pop'].effects, 'free glitch pack enables the supported glitch effect');
+    for (const [name, preset] of Object.entries(tagconfig.FREE_EFFECT_PRESETS)) {
+        ok(tagconfig.ANIMATIONS.includes(preset.textAnimation) && tagconfig.EFFECT_KEYS.every(k => typeof preset[k] === 'boolean'), `free effect pack "${name}" fully defines supported effects`);
+    }
+
     const lua = tagconfig.toLua();
     require('luaparse').parse(lua, { luaVersion: '5.1' });
     ok(true, 'toLua() output is valid Lua 5.1');
     ok(lua.includes('defaults') && lua.includes('presets') && lua.includes('roles'), 'toLua() includes defaults/presets/roles');
+    ok(lua.includes('freeFontPresets') && lua.includes('freeEffectPresets'), 'toLua() includes the curated free-tier presets');
 }
 
 // ── discord-bot interaction handler ─────────────────────────────────────────
-function fakeInteraction({ command, sub, opts = {}, staffOk = true, focused }) {
+function fakeInteraction({ command, sub, opts = {}, staffOk = true, focused, kind = 'chat', customId, fields = {} }) {
     const replies = [];
     return {
         user: { id: 'u1', username: 'staffer' },
         commandName: command,
+        customId,
         memberPermissions: { has: () => staffOk },
         isAutocomplete: () => !!focused,
-        isChatInputCommand: () => !focused,
+        isChatInputCommand: () => !focused && kind === 'chat',
+        isButton: () => kind === 'button',
+        isModalSubmit: () => kind === 'modal',
+        fields: { getTextInputValue: name => fields[name] || '' },
         options: {
             getSubcommand: () => sub,
             getInteger: (name, req) => (name in opts ? opts[name] : (req ? (() => { throw new Error(`missing ${name}`); })() : null)),
@@ -119,6 +134,8 @@ function fakeInteraction({ command, sub, opts = {}, staffOk = true, focused }) {
         reply: async payload => { replies.push({ type: 'reply', payload }); },
         deferReply: async () => { replies.push({ type: 'defer' }); },
         editReply: async payload => { replies.push({ type: 'edit', payload }); },
+        update: async payload => { replies.push({ type: 'update', payload }); },
+        showModal: async modal => { replies.push({ type: 'modal', payload: modal.toJSON() }); },
         respond: async choices => { replies.push({ type: 'autocomplete', choices }); },
     };
 }
@@ -126,13 +143,15 @@ function fakeInteraction({ command, sub, opts = {}, staffOk = true, focused }) {
 function makeStore() {
     let roles = {};
     let tags = {};
+    let tiers = {};
+    const accessState = { allowlisted: [], blacklisted: [], events: [] };
     const roleMeta = tagconfig.ROLE_META;
     function roleFor(id) { return roles[id] ? { role: roles[id].role, label: roles[id].label } : { role: 'member', label: roleMeta.member.label }; }
     function info(id) {
         id = String(id);
         const r = roleFor(id);
         const overrides = (tags[id] && tags[id].overrides) || {};
-        return { userId: id, role: r.role, roleLabel: r.label, hasCustomTag: !!Object.keys(overrides).length, overrides, effective: tagconfig.effectiveTag(r.role, overrides, r.label), updatedAt: (tags[id] && tags[id].updatedAt) || null };
+        return { userId: id, role: r.role, roleLabel: r.label, tier: tiers[id] || 'free', hasCustomTag: !!Object.keys(overrides).length, overrides, effective: tagconfig.effectiveTag(r.role, overrides, r.label), updatedAt: (tags[id] && tags[id].updatedAt) || null };
     }
     return {
         setRole: (id, role, label) => { roles[String(id)] = { role, label: label || roleMeta[role]?.label }; return roles[String(id)]; },
@@ -178,6 +197,16 @@ function makeStore() {
                 tags[id] = { overrides: { ...((tags[id] && tags[id].overrides) || {}), ...tagconfig.presetOverrides(name) }, updatedAt: new Date().toISOString() };
                 return info(id);
             },
+            tier: (id, tier) => { tiers[String(id)] = tier; return info(id); },
+        },
+        access: {
+            blacklist: entry => { accessState.blacklisted.push(entry); accessState.events.push({ action: 'manual_blacklist', userId: String(entry.userId), reason: entry.reason }); return { permanent: !!entry.permanent }; },
+            unblacklist: target => { const i = accessState.blacklisted.findIndex(x => String(x.userId) === String(target)); if (i < 0) return false; accessState.blacklisted.splice(i, 1); accessState.events.push({ action: 'blacklist_remove', target }); return true; },
+            allow: (userId, reason) => { accessState.allowlisted.push({ userId: String(userId), reason }); accessState.events.push({ action: 'allowlist_add', userId: String(userId), reason }); },
+            unallow: userId => { const i = accessState.allowlisted.findIndex(x => x.userId === String(userId)); if (i < 0) return false; accessState.allowlisted.splice(i, 1); accessState.events.push({ action: 'allowlist_remove', userId: String(userId) }); return true; },
+            editReason: (target, reason) => { const entry = accessState.blacklisted.find(x => String(x.userId) === String(target)); if (!entry) return false; entry.reason = reason; accessState.events.push({ action: 'blacklist_reason_edit', target, reason }); return true; },
+            snapshot: () => ({ blacklisted: accessState.blacklisted.map(x => ({ active: true, permanent: !!x.permanent, latestReason: x, identities: [`uid:${x.userId}`] })), allowlisted: accessState.allowlisted.slice() }),
+            history: limit => ({ total: accessState.events.length, events: accessState.events.slice(-limit).reverse() }),
         },
         publicUrl: 'https://example.test',
         lookup: { user: async () => null, assetPreview: async () => null }, // no network in tests
@@ -188,7 +217,10 @@ function makeStore() {
 async function testBot() {
     // command builder sanity
     const cmds = buildCommands(Object.keys(tagconfig.ROLE_META)).map(c => c.toJSON());
-    ok(cmds.map(c => c.name).sort().join(',') === 'nametag,tag', 'buildCommands registers /nametag and /tag');
+    ok(cmds.map(c => c.name).sort().join(',') === 'access,nametag,panel,tag', 'buildCommands registers /access, /nametag, /panel, and /tag');
+    const panelJson = buildPanelComponents().map(row => row.toJSON());
+    ok(panelJson.length === 2 && panelJson.reduce((n, row) => n + row.components.length, 0) >= 8, 'staff dashboard has button rows for access and tag tasks');
+    ok(buildPanelModal('ban').toJSON().components.length === 2 && buildPanelModal('premium').toJSON().components.length === 3, 'dashboard actions open structured input modals');
 
     // permission gate
     const deps0 = makeStore();
@@ -200,6 +232,32 @@ async function testBot() {
     // theme + view
     const deps = makeStore();
     const handle = createHandler(deps);
+    const panelCommand = fakeInteraction({ command: 'panel' });
+    await handle(panelCommand);
+    ok(panelCommand._replies[0]?.payload?.components?.length === 2 && panelCommand._replies[0]?.payload?.flags, '/panel posts a private interactive dashboard');
+    const banButton = fakeInteraction({ kind: 'button', customId: 'scorp:panel:ban' });
+    await handle(banButton);
+    ok(banButton._replies[0]?.type === 'modal' && banButton._replies[0].payload.custom_id === 'scorp:panel:submit:ban', 'Blacklist button opens the expected modal');
+    const deniedButton = fakeInteraction({ kind: 'button', customId: 'scorp:panel:ban', staffOk: false });
+    await handle(deniedButton);
+    ok(deniedButton._replies[0]?.payload?.content?.includes("don't have permission"), 'panel buttons re-check staff permissions');
+    const modalSubmit = fakeInteraction({ kind: 'modal', customId: 'scorp:panel:submit:ban', fields: { roblox_id: '77', reason: 'button-based moderation test' } });
+    await handle(modalSubmit);
+    ok(deps.access.snapshot().blacklisted.some(entry => String(entry.latestReason.userId) === '77'), 'Blacklist modal submission performs the staff action');
+    const styleModal = fakeInteraction({ kind: 'modal', customId: 'scorp:panel:submit:style', fields: { roblox_id: '78', colors: 'Cyber Blue', font: 'Sci-Fi', effects: 'Glitch Pop' } });
+    await handle(styleModal);
+    ok(deps.tags.info(78).effective.accentA === '#3cc8ff' && deps.tags.info(78).effective.rankFont === 'Michroma', 'Apply Style Pack button validates and applies curated styles');
+    const banInter = fakeInteraction({ command: 'access', sub: 'ban', opts: { roblox_id: 42, reason: 'chargeback abuse', permanent: true } });
+    await handle(banInter);
+    ok(deps.access.snapshot().blacklisted.some(entry => String(entry.latestReason.userId) === '42' && entry.latestReason.reason === 'chargeback abuse'), '/access ban stores a staff reason');
+    const editReasonInter = fakeInteraction({ command: 'access', sub: 'reason', opts: { target: '42', text: 'reviewed by staff' } });
+    await handle(editReasonInter);
+    ok(deps.access.snapshot().blacklisted.some(entry => String(entry.latestReason.userId) === '42' && entry.latestReason.reason === 'reviewed by staff'), '/access reason edits the latest blacklist reason');
+    await handle(fakeInteraction({ command: 'access', sub: 'allow', opts: { roblox_id: 44, reason: 'support review' } }));
+    ok(deps.access.snapshot().allowlisted[0]?.reason === 'support review', '/access allow records an allowlist note');
+    const historyInter = fakeInteraction({ command: 'access', sub: 'history', opts: { limit: 10 } });
+    await handle(historyInter);
+    ok(historyInter._replies.some(r => r.payload?.content?.includes('blacklist_reason_edit')), '/access history shows persistent moderation actions');
     await handle(fakeInteraction({ command: 'tag', sub: 'theme', opts: { roblox_id: 42, color: '#33aaff' } }));
     let info = deps.tags.info(42);
     ok(info.effective.accentA === '#33aaff', 'theme subcommand repaints accentA', info.effective.accentA);
@@ -219,6 +277,12 @@ async function testBot() {
     await handle(fakeInteraction({ command: 'tag', sub: 'effects', opts: { roblox_id: 42, glow: true, spin: false } }));
     info = deps.tags.info(42);
     ok(info.effective.glow === true && info.effective.spin === false, 'grouped /tag effects applies multiple booleans at once', info.effective);
+    const tierInter = fakeInteraction({ command: 'tag', sub: 'tier', opts: { roblox_id: 42, tier: 'premium', reason: 'paid purchase' } });
+    await handle(tierInter);
+    ok(tierInter._replies.some(r => r.type === 'edit' && /premium/.test(r.payload.content)), '/tag tier marks a paid custom-tag entitlement');
+    await handle(fakeInteraction({ command: 'tag', sub: 'style', opts: { roblox_id: 54, colors: 'Cyber Blue', font: 'Sci-Fi', effects: 'Glitch Pop', premium: true } }));
+    info = deps.tags.info(54);
+    ok(info.effective.accentA === '#3cc8ff' && info.effective.rankFont === 'Michroma' && info.effective.glitch && info.tier === 'premium', '/tag style applies the curated color/font/effect pack and optional premium tier');
 
     // text / layout groups
     await handle(fakeInteraction({ command: 'tag', sub: 'text', opts: { roblox_id: 42, label: 'Cosmic Herald', text_size: 18 } }));
