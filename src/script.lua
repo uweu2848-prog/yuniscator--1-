@@ -174,10 +174,7 @@ local TagManagerPanel = (tagManagerAuthorized and not staffAuthorized and TagPan
 local SupportStaffPanel = (supportAuthorized and not staffAuthorized and not tagManagerAuthorized and SupportPanel) and SupportPanel.Build(Window, ctx) or nil
 
 -- ───────────────────────────────────────────────────────────────────────────
-    sec:AddLabel("NAME TAGS\nDesign your colors, fonts, and effects in the Name Tags tab. Your Roblox username stays visible to the community.", { Wrap = true })
-    sec:AddLabel("PERSONALIZE\nOpen Theme Maker to switch palettes. Settings contains visibility, saved configs, and your menu key.", { Wrap = true, Color = Window.Theme.TextDim })
-    sec:AddLabel("SHORTCUTS\nRightShift opens or hides the menu   ·   Delete unloads Scorp", { Wrap = true, Color = Window.Theme.AccentLight })
-
+local Home = Window:CreateTab("Overview", { Icon = "✦", Default = true })
 
 Editor = TagEditor.Build(Window, Nametags)
 local Roster = PlayerRoster.Build(Window, Players, LocalPlayer)
@@ -212,6 +209,9 @@ do
         Window:Notify("Visuals reset", "Scorp's local post-processing effects were removed.", 3, Window.Theme.Success)
     end)
 end
+
+Window:SelectTab(Home)
+
 do
     local hero = Home:CreateSection("YOUR SCORP SPACE", true)
     local card = hero:AddCustom(142)
