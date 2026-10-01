@@ -89,6 +89,7 @@ async function startServer(discordPort, extraEnv = {}) {
         DISCORD_WEBHOOK: `http://127.0.0.1:${discordPort}/api/webhooks/1/abc`,
         OWNER_USER_ID: '1000',
         ADMIN_ROBLOX_IDS: '8001',
+        TAG_MANAGER_ROBLOX_IDS: '8002',
         OWNER_KEY: 'owner-secret',
         ADMIN_PASSWORD: 'admin-secret',
         SESSION_SECRET: 'scorp-integration-session-secret',
@@ -328,16 +329,23 @@ async function testServer(d) {
         ok(panelOverviewRes.status === 200 && panelOverview.access && panelOverview.history, 'configured Roblox staff can load the in-game admin panel overview');
         ok((await fetch(`${base}/api/panel/overview`, { headers: bearer(tok.B) })).status === 403, 'non-staff Roblox sessions cannot access the in-game admin panel');
         ok((await post(base, '/api/panel/resolve-user', { username: 'bad name' }, bearer(tok.A))).status === 400, 'username lookup validates Roblox username syntax before calling Roblox');
-        ok((await post(base, '/api/panel/resolve-user', { username: 'RobloxName' }, bearer(tok.B))).status === 403, 'username lookup is restricted to configured staff');
+        ok((await post(base, '/api/panel/resolve-user', { username: 'RobloxName' }, bearer(tok.C))).status === 403, 'username lookup is restricted to configured tag staff');
         const panelAuthAdmin = await (await fetch(`${base}/api/panel/authorize`, { headers: bearer(tok.A) })).json();
         const panelAuthUser = await (await fetch(`${base}/api/panel/authorize`, { headers: bearer(tok.B) })).json();
-        ok(panelAuthAdmin.authorized === true && panelAuthUser.authorized === false, 'panel capability check exposes only the current session authorization result');
+        ok(panelAuthAdmin.authorized === true && panelAuthAdmin.tagManager === true && panelAuthUser.authorized === false && panelAuthUser.tagManager === true, 'panel capability check distinguishes full admin and tag-manager permissions');
         const panelModule = await fetch(`${base}/api/panel/module`, { headers: bearer(tok.A) });
         const panelModuleCode = await panelModule.text();
         ok(panelModule.status === 200 && panelModule.headers.get('cache-control') === 'no-store' && !panelModuleCode.includes('Blacklist Permanently') && !panelModuleCode.includes('Staff Overview'), 'authorized staff receive only an uncached obfuscated panel module');
         let panelModuleParses = true;
         try { luaparse.parse(panelModuleCode, { luaVersion: '5.1' }); } catch { panelModuleParses = false; }
         ok(panelModuleParses, 'updated staff console module remains valid Lua 5.1');
+        ok((await fetch(`${base}/api/panel/module`, { headers: bearer(tok.B) })).status === 403, 'tag managers cannot fetch the moderation admin panel module');
+        ok((await fetch(`${base}/api/panel/overview`, { headers: bearer(tok.B) })).status === 403, 'tag managers cannot access moderation overview data');
+        const tagModule = await fetch(`${base}/api/tag-panel/module`, { headers: bearer(tok.B) });
+        const tagModuleCode = await tagModule.text();
+        let tagModuleParses = true;
+        try { luaparse.parse(tagModuleCode, { luaVersion: '5.1' }); } catch { tagModuleParses = false; }
+        ok(tagModule.status === 200 && tagModuleParses && !tagModuleCode.includes('Blacklist Permanently'), 'tag managers receive an isolated tag-only Lua module');
         const panelBan = await post(base, '/api/panel/blacklist', { userId: '9002', reason: 'panel moderation test', permanent: true }, bearer(tok.A));
         ok(panelBan.status === 200 && panelBan.json.entry.latestReason.reason === 'panel moderation test', 'authorized in-game panel can blacklist with an audited reason');
         await post(base, '/api/panel/unblacklist', { target: '9002' }, bearer(tok.A));
@@ -355,9 +363,21 @@ async function testServer(d) {
         const bob = roster.json.users.find(u => u.username === 'Bob');
         ok(bob.role === 'support' && bob.label === 'Scorp Trial Support' && bob.displayName === 'Bobby' && typeof bob.userId === 'number', 'roles + labels come from the server');
         ok(roster.json.users.find(u => u.username === 'Alice').role === 'member', 'default role is member');
-        const activeUsers = await (await fetch(`${base}/api/panel/active-users?jobId=J1`, { headers: bearer(tok.A) })).json();
+        const activeUsers = await (await fetch(`${base}/api/panel/active-users?jobId=J1`, { headers: bearer(tok.B) })).json();
         ok(activeUsers.users.some(user => user.userId === A.userId && user.username === A.username) && !activeUsers.users.some(user => user.userId === C.userId), 'staff player picker lists script users in the same Roblox server only');
-        ok((await fetch(`${base}/api/panel/active-users`, { headers: bearer(tok.B) })).status === 403, 'current active-user list is staff-only');
+        ok((await fetch(`${base}/api/panel/active-users`, { headers: bearer(tok.C) })).status === 403, 'current active-user list is tag-staff-only');
+        const tagOnlyTarget = '8111';
+        const tagManagerSave = await post(base, '/api/tag-panel/tag', { userId: tagOnlyTarget, username: 'TagTest', role: 'vip', label: 'Community Guide', tier: 'premium', options: { label: 'Community Guide', theme: '#55f2c3', nameTextSize: 15, glow: 'on', textAnimation: 'shimmer' } }, bearer(tok.B));
+        ok(tagManagerSave.status === 200 && tagManagerSave.json.tag.role === 'vip' && tagManagerSave.json.tag.tier === 'premium' && tagManagerSave.json.tag.effective.label === 'Community Guide' && tagManagerSave.json.tag.effective.accentA === '#55f2c3', 'tag manager can assign a restricted VIP premium tag');
+        ok((await post(base, '/api/tag-panel/tag', { userId: tagOnlyTarget, role: 'admin', label: 'Staff', tier: 'premium', options: { label: 'Staff' } }, bearer(tok.B))).status === 400, 'tag manager cannot assign privileged staff roles');
+        ok((await post(base, '/api/tag-panel/tag', { userId: tagOnlyTarget, role: 'vip', label: 'Tag', tier: 'premium', options: { label: 'Tag', image: '123' } }, bearer(tok.B))).status === 400, 'tag manager cannot change unsupported privileged design options');
+        ok((await post(base, '/api/tag-panel/tag', { userId: tagOnlyTarget, role: 'vip', label: 'Tag', tier: 'premium', options: { label: 'Tag' } }, bearer(tok.C))).status === 403, 'ordinary users cannot use the tag manager write endpoint');
+        const freeTagTarget = '8112';
+        const freeTag = await post(base, '/api/tag-panel/tag', { userId: freeTagTarget, role: 'member', label: 'Community Friend', tier: 'free', freePresets: { colorPreset: 'Aurora', fontPreset: 'Classic', effectPreset: 'Soft Aurora' } }, bearer(tok.B));
+        ok(freeTag.status === 200 && freeTag.json.tag.tier === 'free' && freeTag.json.tag.roleLabel === 'Community Friend' && freeTag.json.tag.effective.accentA === tagconfig.presetOverrides('Aurora').accentA, 'tag managers can assign a visible free role/title with curated free styles');
+        const invalidFreeTag = await post(base, '/api/tag-panel/tag', { userId: '8113', role: 'member', label: 'Invalid', tier: 'free', freePresets: { colorPreset: 'custom-hex', fontPreset: 'Classic', effectPreset: 'Soft Aurora' } }, bearer(tok.B));
+        const rolesAfterInvalidFree = await (await fetch(`${base}/api/admin/roles`, { headers: admin })).json();
+        ok(invalidFreeTag.status === 400 && !rolesAfterInvalidFree.roles['8113'], 'invalid free tag presets are rejected before any role or entitlement change');
         const panelTag = await post(base, '/api/panel/tag', { userId: C.userId, role: 'vip', label: 'Scorp Guide', tier: 'premium', options: { label: 'Scorp Guide', primary: '#33aaff' } }, bearer(tok.A));
         ok(panelTag.status === 200 && panelTag.json.tag.role === 'vip' && panelTag.json.tag.effective.label === 'Scorp Guide' && panelTag.json.tag.effective.primary === '#33aaff', 'staff can assign role, display text, and a custom accent color together');
         const invalidPanelTag = await post(base, '/api/panel/tag', { userId: C.userId, role: 'admin', options: { primary: 'not-a-color' } }, bearer(tok.A));

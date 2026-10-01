@@ -54,6 +54,7 @@ const CONFIG = {
     WEBHOOK_STARTUP_PING: flag(env.WEBHOOK_STARTUP_PING, true),
     OWNER_USER_ID: String(env.OWNER_USER_ID || '').trim(),
     ADMIN_ROBLOX_IDS: (env.ADMIN_ROBLOX_IDS || '').split(',').map(s => s.trim()).filter(s => /^\d{1,20}$/.test(s)),
+    TAG_MANAGER_ROBLOX_IDS: (env.TAG_MANAGER_ROBLOX_IDS || '').split(',').map(s => s.trim()).filter(s => /^\d{1,20}$/.test(s)),
     OWNER_KEY: env.OWNER_KEY || '',
     ADMIN_PASSWORD: env.ADMIN_PASSWORD || '',
     DISCORD_TOKEN: (env.DISCORD_TOKEN || '').trim(),
@@ -114,6 +115,7 @@ const ACTIVE_WEBHOOK_FILE = path.join(CONFIG.DATA_DIR, 'active-users-webhook.jso
 const SECRET_FILE = path.join(CONFIG.DATA_DIR, 'session.key');
 const LIB_FILE = path.join(ROOT, 'src', 'ScorpLib.lua');
 const ADMIN_PANEL_FILE = path.join(ROOT, 'src', 'adminpanel.lua');
+const TAG_PANEL_FILE = path.join(ROOT, 'src', 'tagpanel.lua');
 const LOADER_FILE = path.join(ROOT, 'loader.lua');
 
 // Secrets that were not provided
@@ -188,6 +190,7 @@ function verifyToken(token) {
 
 const ownerKeyOk = k => !!CONFIG.OWNER_KEY && typeof k === 'string' && k.length > 0 && safeEqual(k, CONFIG.OWNER_KEY);
 const panelAdminIds = new Set([CONFIG.OWNER_USER_ID, ...CONFIG.ADMIN_ROBLOX_IDS].filter(isDigits));
+const tagManagerIds = new Set(CONFIG.TAG_MANAGER_ROBLOX_IDS);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Discord webhook — queued, rate-limit aware, and it tells you when it fails
@@ -996,12 +999,25 @@ function requirePanelAdmin(req, res, next) {
     next();
 }
 
+function isTagManager(userId) {
+    const id = String(userId || '');
+    return panelAdminIds.has(id) || tagManagerIds.has(id);
+}
+
+function requireTagManager(req, res, next) {
+    if (!req.claims || !isTagManager(req.claims.u)) {
+        return res.status(403).json({ ok: false, error: 'This Roblox account is not authorized for tag management.' });
+    }
+    next();
+}
+
 app.get('/api/panel/authorize', requireToken, (req, res) => {
-    res.json({ ok: true, authorized: panelAdminIds.has(String(req.claims.u)) });
+    const admin = panelAdminIds.has(String(req.claims.u));
+    res.json({ ok: true, authorized: admin, tagManager: isTagManager(req.claims.u) });
 });
 
 const panelLookupLimiter = new Map();
-app.post('/api/panel/resolve-user', requireToken, requirePanelAdmin, async (req, res) => {
+app.post('/api/panel/resolve-user', requireToken, requireTagManager, async (req, res) => {
     const username = cleanStr((req.body || {}).username, 40).replace(/^@/, '');
     if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) return res.status(400).json({ ok: false, error: 'Enter a Roblox username (3–20 letters, numbers, or underscores).' });
     const t = now();
@@ -1026,7 +1042,7 @@ app.post('/api/panel/resolve-user', requireToken, requirePanelAdmin, async (req,
     }
 });
 
-app.get('/api/panel/active-users', requireToken, requirePanelAdmin, (req, res) => {
+app.get('/api/panel/active-users', requireToken, requireTagManager, (req, res) => {
     const jobId = cleanStr(req.query.jobId, 64);
     const users = activeUsersSnapshot().filter(user => !jobId || user.jobId === jobId);
     res.json({ ok: true, users });
@@ -1039,6 +1055,69 @@ app.get('/api/panel/module', requireToken, requirePanelAdmin, (req, res) => {
         console.error('[panel] could not build authorized module:', e.message);
         res.status(503).json({ ok: false, error: 'Staff panel module is temporarily unavailable.' });
     }
+});
+
+app.get('/api/tag-panel/module', requireToken, requireTagManager, (req, res) => {
+    try {
+        res.type('text/plain').set('Cache-Control', 'no-store').send(fs.readFileSync(TAG_PANEL_FILE, 'utf8'));
+    } catch (e) {
+        console.error('[tag-panel] could not load authorized module:', e.message);
+        res.status(503).json({ ok: false, error: 'Tag management panel is temporarily unavailable.' });
+    }
+});
+
+app.post('/api/tag-panel/tag', requireToken, requireTagManager, (req, res) => {
+    try {
+        const b = req.body || {};
+        const userId = String(b.userId || '');
+        if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+        const role = String(b.role || 'member').toLowerCase();
+        if (!['member', 'vip'].includes(role)) throw new tagconfig.TagError('Tag managers can assign only Member or VIP roles.');
+        const label = cleanStr(b.label, 24);
+        if (!label) throw new tagconfig.TagError('Enter a tag title (max 24 characters).');
+        const tier = b.tier;
+        if (tier !== 'free' && tier !== 'premium') throw new tagconfig.TagError('Choose free or premium tag access.');
+        let tag;
+        if (tier === 'free') {
+            const presets = b.freePresets;
+            if (!presets || typeof presets !== 'object' || Array.isArray(presets)) throw new tagconfig.TagError('Choose free color, font, and effect presets.');
+            if (!tagconfig.PRESET_NAMES.includes(presets.colorPreset)
+                || !tagconfig.FREE_FONT_PRESET_ORDER.includes(presets.fontPreset)
+                || !tagconfig.FREE_EFFECT_PRESET_ORDER.includes(presets.effectPreset)) {
+                throw new tagconfig.TagError('Choose only an approved free color, font, and effect preset.');
+            }
+            setRole(userId, role, label);
+            setPaidTagTier(userId, false, b.reason || 'Updated by tag manager', req.who.userId);
+            tag = applyFreeTagPresets(userId, presets);
+        } else {
+            const options = { ...(b.options || {}), label };
+            if (!b.options || typeof b.options !== 'object' || Array.isArray(b.options)) throw new tagconfig.TagError('Choose a supported tag design.');
+            const managerOptionKeys = new Set([
+                'theme', 'primary', 'accentA', 'accentB', 'accentC', 'backgroundColorA', 'backgroundColorB', 'backgroundColorC',
+                'nameColor', 'rankFont', 'userFont', 'textSize', 'nameTextSize', 'textAnimation', 'glow', 'pulse', 'spin',
+                'particles', 'underlineSweep', 'glitch', 'effects', 'grid', 'logoMotion',
+            ]);
+            const unsupported = Object.keys(options).find(key => !managerOptionKeys.has(key) && key !== 'label');
+            if (unsupported) throw new tagconfig.TagError(`Tag managers cannot edit this option: ${unsupported}.`);
+            let candidate = { ...((tags[userId] && tags[userId].overrides) || {}) };
+            for (const [key, value] of Object.entries(options)) {
+                if (key === 'theme') candidate = { ...candidate, ...tagconfig.themeOverrides(value) };
+                else candidate = tagconfig.applyOption(candidate, key, value);
+            }
+            setRole(userId, role, label);
+            setPaidTagTier(userId, true, b.reason || 'Granted by tag manager', req.who.userId);
+            tag = setTagOptions(userId, options);
+        }
+        recordAccessEvent('tag_manager_design', {
+            userId,
+            username: cleanStr(b.username, 40) || 'Unknown',
+            role,
+            tier,
+            title: label,
+            actor: req.who.userId,
+        });
+        res.json({ ok: true, tag });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // ── Public ──────────────────────────────────────────────────────────────────

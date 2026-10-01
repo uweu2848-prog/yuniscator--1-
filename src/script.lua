@@ -31,6 +31,7 @@ end)()
 
 -- Staff-panel code is fetched separately only after the server authorizes this session.
 local AdminPanel = nil
+local TagPanel = nil
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  UI library (delivered by the server over the authenticated session)
@@ -66,6 +67,7 @@ assert(type(Window) == "table" and type(Window.CreateTab) == "function",
 -- Ask the authenticated server whether this session is a configured staff ID.
 -- Do not construct or attach any staff UI when the answer is missing/negative.
 local staffAuthorized = false
+local tagManagerAuthorized = false
 do
     local ok, response = pcall(ctx.request, {
         Url = ctx.server .. "/api/panel/authorize",
@@ -77,6 +79,7 @@ do
             return game:GetService("HttpService"):JSONDecode(response.Body or "")
         end)
         staffAuthorized = decoded and type(data) == "table" and data.authorized == true
+        tagManagerAuthorized = decoded and type(data) == "table" and data.tagManager == true
     end
     if staffAuthorized then
         local moduleOk, moduleResponse = pcall(ctx.request, {
@@ -98,6 +101,27 @@ do
             end
         else
             warn("[Scorp] authorized admin module could not be fetched.")
+        end
+    elseif tagManagerAuthorized then
+        local moduleOk, moduleResponse = pcall(ctx.request, {
+            Url = ctx.server .. "/api/tag-panel/module",
+            Method = "GET",
+            Headers = { ["Authorization"] = "Bearer " .. tostring(ctx.token) },
+        })
+        if moduleOk and type(moduleResponse) == "table" and moduleResponse.StatusCode == 200 and type(moduleResponse.Body) == "string" then
+            local moduleFn, moduleErr = ctx.loadstring(moduleResponse.Body)
+            if moduleFn then
+                local loadedOk, module = pcall(moduleFn)
+                if loadedOk and type(module) == "table" and type(module.Build) == "function" then
+                    TagPanel = module
+                else
+                    warn("[Scorp] authorized tag panel failed to initialize: " .. tostring(module))
+                end
+            else
+                warn("[Scorp] authorized tag panel failed to compile: " .. tostring(moduleErr))
+            end
+        else
+            warn("[Scorp] authorized tag panel could not be fetched.")
         end
     end
 end
@@ -197,6 +221,7 @@ end
 -- constructed after the server authorizes this session.
 local Editor = TagEditor.Build(Window, Nametags)
 local StaffPanel = staffAuthorized and AdminPanel and AdminPanel.Build(Window, ctx) or nil
+local TagManagerPanel = (tagManagerAuthorized and not staffAuthorized and TagPanel) and TagPanel.Build(Window, ctx) or nil
 
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
@@ -250,6 +275,8 @@ do
     end)
     if StaffPanel then
         sec:AddButton("Open Admin Panel · Staff", function() StaffPanel.Open() end)
+    elseif TagManagerPanel then
+        sec:AddButton("Open Tag Manager · Staff", function() TagManagerPanel.Open() end)
     end
 end
 
@@ -261,6 +288,7 @@ ctx.revoke = function(message, updateRequired)
     if updateRequired then
         pcall(Editor.Destroy)
         if StaffPanel then pcall(StaffPanel.Destroy) end
+        if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
         pcall(Nametags.Stop)
         pcall(function() Window:Toggle(true) end)
         pcall(function() Window:Notify("Update Required", tostring(message or "Scorp was updated. Relaunch the latest loader to continue."), 30, Window.Theme.Warning) end)
@@ -274,6 +302,7 @@ Window:OnUnload(function()
     print("[Scorp] unloaded")
     pcall(Editor.Destroy)
     if StaffPanel then pcall(StaffPanel.Destroy) end
+    if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
     Nametags.Stop()
 end)
 
