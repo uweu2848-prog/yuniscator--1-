@@ -169,9 +169,8 @@ Window:SetWatermark(('<font color="rgb(168,186,214)">Scorp</font>  ·  %s %s'):f
 -- Build only real tools into the navigation. The former Player, Visuals and
 -- Misc tabs were demo placeholders with callbacks that did nothing.
 local Editor
-local StaffPanel = staffAuthorized and AdminPanel and AdminPanel.Build(Window, ctx) or nil
-local TagManagerPanel = (tagManagerAuthorized and not staffAuthorized and TagPanel) and TagPanel.Build(Window, ctx) or nil
-local SupportStaffPanel = (supportAuthorized and not staffAuthorized and not tagManagerAuthorized and SupportPanel) and SupportPanel.Build(Window, ctx) or nil
+local StaffPanel, TagManagerPanel, SupportStaffPanel
+local quickLaunchSection
 
 -- ───────────────────────────────────────────────────────────────────────────
 local Home = Window:CreateTab("Overview", { Icon = "✦", Default = true })
@@ -209,8 +208,6 @@ do
         Window:Notify("Visuals reset", "Scorp's local post-processing effects were removed.", 3, Window.Theme.Success)
     end)
 end
-
-Window:SelectTab(Home)
 
 do
     local hero = Home:CreateSection("YOUR SCORP SPACE", true)
@@ -294,6 +291,7 @@ end
 
 do
     local sec = Home:CreateSection("QUICK LAUNCH", true)
+    quickLaunchSection = sec
     sec:AddLabel("Jump straight to the tools you actually use.", { Wrap = true, Color = Window.Theme.TextDim })
     sec:AddButton("✦  Open Name Tag Studio", function() Editor.Open() end)
     sec:AddButton("↻  Refresh Nearby Nametags", function()
@@ -308,13 +306,6 @@ do
         Nametags.Preview(nil)
         Window:Notify("Preview cleared", "Your normal nametag style is restored.", 3)
     end)
-    if StaffPanel then
-        sec:AddButton("⚑  Open Staff Console", function() StaffPanel.Open() end)
-    elseif TagManagerPanel then
-        sec:AddButton("✦  Open Tag Studio · Staff", function() TagManagerPanel.Open() end)
-    elseif SupportStaffPanel then
-        sec:AddButton("?  Open Support Desk", function() SupportStaffPanel.Open() end)
-    end
 end
 
 do
@@ -328,6 +319,34 @@ end
 --  Settings
 -- ───────────────────────────────────────────────────────────────────────────
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
+
+-- Build the privileged panels only after the public tabs and their content
+-- exist. A staff-module/UI incompatibility should not blank the entire menu.
+local function tryBuildStaffPanel(label, module)
+    if type(module) ~= "table" or type(module.Build) ~= "function" then return nil end
+    local ok, panel = pcall(module.Build, Window, ctx)
+    if not ok or type(panel) ~= "table" then
+        warn("[Scorp] " .. label .. " panel initialization failed: " .. tostring(panel))
+        return nil
+    end
+    return panel
+end
+
+if staffAuthorized then
+    StaffPanel = tryBuildStaffPanel("admin", AdminPanel)
+elseif tagManagerAuthorized then
+    TagManagerPanel = tryBuildStaffPanel("tag manager", TagPanel)
+elseif supportAuthorized then
+    SupportStaffPanel = tryBuildStaffPanel("support", SupportPanel)
+end
+
+if StaffPanel then
+    quickLaunchSection:AddButton("⚑  Open Staff Console", function() StaffPanel.Open() end)
+elseif TagManagerPanel then
+    quickLaunchSection:AddButton("✦  Open Tag Studio · Staff", function() TagManagerPanel.Open() end)
+elseif SupportStaffPanel then
+    quickLaunchSection:AddButton("?  Open Support Desk", function() SupportStaffPanel.Open() end)
+end
 
 Window:AddConfigControls(Settings, "💾 Configs")
 
