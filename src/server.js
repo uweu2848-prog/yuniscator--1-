@@ -80,7 +80,6 @@ const CONFIG = {
     STRIKE_SCORE: num(env.STRIKE_SCORE, 2),             // a session needs at least this score to count as a strike
     SUSPICIOUS_IDENTITY_COUNT: 3,
     SUSPICIOUS_WINDOW_MS: 60 * 60 * 1000,
-    JOIN_ALERTS: flag(env.JOIN_ALERTS, true), // set JOIN_ALERTS=false to silence per-session join alerts
     SESSION_HISTORY_MAX: num(env.SESSION_HISTORY_MAX, 200), // how many past sessions to keep in memory
 };
 
@@ -110,6 +109,8 @@ const TAGS_FILE = path.join(CONFIG.DATA_DIR, 'tags.json');
 const PAID_TAGS_FILE = path.join(CONFIG.DATA_DIR, 'paid-tags.json');
 const ACCESS_FILE = path.join(CONFIG.DATA_DIR, 'access.json');
 const ACCESS_HISTORY_FILE = path.join(CONFIG.DATA_DIR, 'access-history.json');
+const KNOWN_USERS_FILE = path.join(CONFIG.DATA_DIR, 'known-users.json');
+const ACTIVE_WEBHOOK_FILE = path.join(CONFIG.DATA_DIR, 'active-users-webhook.json');
 const SECRET_FILE = path.join(CONFIG.DATA_DIR, 'session.key');
 const LIB_FILE = path.join(ROOT, 'src', 'ScorpLib.lua');
 const ADMIN_PANEL_FILE = path.join(ROOT, 'src', 'adminpanel.lua');
@@ -259,6 +260,20 @@ function alert(embedSpec) {
     if (webhookQueue.length > 50) webhookQueue.shift(); // never let a flood grow memory
     webhookQueue.push(body);
     drainWebhooks();
+}
+
+function webhookMessageUrl(messageId) {
+    const url = new URL(CONFIG.DISCORD_WEBHOOK);
+    url.search = '';
+    url.hash = '';
+    url.pathname = `${url.pathname.replace(/\/$/, '')}/messages/${encodeURIComponent(messageId)}`;
+    return url;
+}
+
+function webhookCreateUrl() {
+    const url = new URL(CONFIG.DISCORD_WEBHOOK);
+    url.searchParams.set('wait', 'true');
+    return url;
 }
 
 async function checkWebhookAtStartup() {
@@ -480,6 +495,40 @@ function banInfo(root) {
 // ────────────────────────────────────────────────────────────────────────────
 const issued = new Map();    // nonce -> { userId, username, hwid, ip, executor, platform, issuedAt, confirmed, alerted, ownerOk }
 const presence = new Map();  // userId -> { userId, username, displayName, jobId, placeId, lastSeen }
+let knownUsers = readJson(KNOWN_USERS_FILE, {});
+if (!knownUsers || typeof knownUsers !== 'object' || Array.isArray(knownUsers)) knownUsers = {};
+
+function rememberUser(userId, username, countSession) {
+    const t = now();
+    let record = knownUsers[userId];
+    if (!record || typeof record !== 'object' || Array.isArray(record)) record = knownUsers[userId] = null;
+    const firstSeen = !record;
+    if (!record) record = knownUsers[userId] = { firstSeen: t, sessions: 0 };
+    record.username = cleanStr(username, 40) || record.username || 'Unknown';
+    record.lastSeen = t;
+    if (countSession) record.sessions = (Number(record.sessions) || 0) + 1;
+    writeJsonAtomic(KNOWN_USERS_FILE, knownUsers);
+    return { ...record, isFirstSeen: firstSeen };
+}
+
+function markUserActive(who, details = {}) {
+    const previous = presence.get(who.userId) || {};
+    const session = issued.get(who.nonce) || {};
+    const known = knownUsers[who.userId] || {};
+    presence.set(who.userId, {
+        userId: who.userId,
+        username: cleanStr(who.username, 40) || previous.username || 'Unknown',
+        displayName: cleanStr(details.displayName, 32) || previous.displayName || cleanStr(who.username, 40) || 'Unknown',
+        jobId: cleanStr(details.jobId || who.jobId || previous.jobId, 64),
+        placeId: cleanStr(details.placeId || who.placeId || previous.placeId, 20),
+        executor: cleanStr(session.executor || who.executor || previous.executor, 80) || 'Unknown',
+        platform: cleanStr(session.platform || who.platform || previous.platform, 20) || 'Unknown',
+        firstSeen: Number(known.firstSeen) || now(),
+        sessions: Number(known.sessions) || 0,
+        lastSeen: now(),
+    });
+    scheduleActiveUsersWebhook();
+}
 
 // Ring buffer of completed/expired sessions — survives the issued map TTL cleanup.
 // Lets you see who used the script in the last N sessions even after they left.
@@ -849,7 +898,14 @@ setInterval(() => {
             });
         }
     }
-    for (const [uid, p] of presence) if (t - p.lastSeen > CONFIG.PRESENCE_TTL_MS * 4) presence.delete(uid);
+    let expiredPresence = false;
+    for (const [uid, p] of presence) {
+        if (t - p.lastSeen > CONFIG.PRESENCE_TTL_MS) {
+            presence.delete(uid);
+            expiredPresence = true;
+        }
+    }
+    if (expiredPresence) scheduleActiveUsersWebhook();
     for (const [k, ts] of alertSeen) if (t - ts > 60 * 60 * 1000) alertSeen.delete(k);
     for (const [k, ts] of lastIssue) if (t - ts > 60 * 1000) lastIssue.delete(k);
 }, CONFIG.WATCHER_INTERVAL_MS).unref();
@@ -944,6 +1000,38 @@ app.get('/api/panel/authorize', requireToken, (req, res) => {
     res.json({ ok: true, authorized: panelAdminIds.has(String(req.claims.u)) });
 });
 
+const panelLookupLimiter = new Map();
+app.post('/api/panel/resolve-user', requireToken, requirePanelAdmin, async (req, res) => {
+    const username = cleanStr((req.body || {}).username, 40).replace(/^@/, '');
+    if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) return res.status(400).json({ ok: false, error: 'Enter a Roblox username (3–20 letters, numbers, or underscores).' });
+    const t = now();
+    const last = panelLookupLimiter.get(req.claims.u) || 0;
+    if (t - last < 1000) return res.status(429).json({ ok: false, error: 'Please wait before looking up another username.' });
+    panelLookupLimiter.set(req.claims.u, t);
+    try {
+        const response = await fetch('https://users.roblox.com/v1/usernames/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usernames: [username], excludeBannedUsers: false }),
+            signal: AbortSignal.timeout(8000),
+        });
+        if (!response.ok) return res.status(502).json({ ok: false, error: 'Roblox username lookup is temporarily unavailable.' });
+        const data = await response.json();
+        const user = Array.isArray(data.data) && data.data.find(entry => String(entry.name || '').toLowerCase() === username.toLowerCase());
+        if (!user || !isDigits(String(user.id))) return res.status(404).json({ ok: false, error: `No Roblox account found for @${username}.` });
+        res.json({ ok: true, user: { userId: String(user.id), username: cleanStr(user.name, 40), displayName: cleanStr(user.displayName, 40) } });
+    } catch (e) {
+        console.warn('[panel] Roblox username lookup failed:', e.message);
+        res.status(502).json({ ok: false, error: 'Roblox username lookup is temporarily unavailable.' });
+    }
+});
+
+app.get('/api/panel/active-users', requireToken, requirePanelAdmin, (req, res) => {
+    const jobId = cleanStr(req.query.jobId, 64);
+    const users = activeUsersSnapshot().filter(user => !jobId || user.jobId === jobId);
+    res.json({ ok: true, users });
+});
+
 app.get('/api/panel/module', requireToken, requirePanelAdmin, (req, res) => {
     try {
         res.type('text/plain').set('Cache-Control', 'no-store').send(getAdminPanelModule());
@@ -1024,19 +1112,10 @@ app.post('/api/session', sessionLimiter, (req, res) => {
     const claims = { v: 1, n: nonce, u: userId, nm: username, h: hwid, b: build.id, c: CONFIG.RELEASE_CHANNEL, rv: CONFIG.RELEASE_VERSION, iat: now(), exp: now() + CONFIG.TOKEN_TTL_MS, ok: ownerOk ? 1 : 0 };
     const token = signToken(claims);
     issued.set(nonce, { userId, username, hwid, ip, executor, platform, jobId, placeId, buildId: build.id, releaseChannel: CONFIG.RELEASE_CHANNEL, releaseVersion: CONFIG.RELEASE_VERSION, watermark: personalized.watermark, issuedAt: now(), confirmed: !!b.resume, alerted: false, ownerOk });
+    rememberUser(userId, username, !b.resume);
+    scheduleActiveUsersWebhook();
 
     if (b.resume) return res.json({ ok: true, token, hb: CONFIG.HEARTBEAT_SECONDS, build: build.id, watermark: personalized.watermark, releaseChannel: CONFIG.RELEASE_CHANNEL, releaseVersion: CONFIG.RELEASE_VERSION });
-
-    // A fresh (non-resume) session means someone just ran the script for the first time
-    // this session. Optional — off by default so you're not pinged on every single join.
-    if (CONFIG.JOIN_ALERTS) {
-        alert({
-            title: '🟢 New Scorp user',
-            color: 0x2ecc71,
-            description: 'A user started Scorp. · discord.gg/scorp',
-            fields: alertIdentityFields({ ...who, nonce }),
-        });
-    }
 
     res.json({ ok: true, token, payload: personalized.code, lib: getLib(), hb: CONFIG.HEARTBEAT_SECONDS, build: build.id, watermark: personalized.watermark, releaseChannel: CONFIG.RELEASE_CHANNEL, releaseVersion: CONFIG.RELEASE_VERSION, releaseNotes: CONFIG.RELEASE_NOTES || null });
 });
@@ -1044,6 +1123,7 @@ app.post('/api/session', sessionLimiter, (req, res) => {
 app.post('/api/heartbeat', requireToken, (req, res) => {
     const banned = handleFlags(req.who, (req.body || {}).flags, 'heartbeat');
     if (banned) return res.status(403).json({ ok: false, revoked: true });
+    markUserActive(req.who);
     res.json({ ok: true });
 });
 
@@ -1057,20 +1137,16 @@ app.post('/api/nametags/sync', requireToken, (req, res) => {
 
     const b = req.body || {};
     const jobId = cleanStr(b.jobId, 64);
-    const me = {
-        userId: req.who.userId,
-        username: req.who.username,
-        displayName: cleanStr(b.displayName, 32) || req.who.username,
+    markUserActive(req.who, {
+        displayName: cleanStr(b.displayName, 32),
         jobId,
         placeId: cleanStr(b.placeId, 20),
-        lastSeen: t,
-    };
-    presence.set(me.userId, me);
+    });
 
     const users = [];
     for (const p of presence.values()) {
         if (t - p.lastSeen > CONFIG.PRESENCE_TTL_MS) continue;
-        if (p.userId !== me.userId && (!jobId || p.jobId !== jobId)) continue;
+        if (p.userId !== req.who.userId && (!jobId || p.jobId !== jobId)) continue;
         users.push({ userId: Number(p.userId), username: p.username, displayName: p.displayName, ...publicTagFor(p.userId) });
         if (users.length >= 100) break;
     }
@@ -1078,7 +1154,7 @@ app.post('/api/nametags/sync', requireToken, (req, res) => {
 });
 
 app.post('/api/nametags/leave', requireToken, (req, res) => {
-    presence.delete(req.who.userId);
+    if (presence.delete(req.who.userId)) scheduleActiveUsersWebhook();
     res.json({ ok: true });
 });
 
@@ -1206,9 +1282,145 @@ function activeUsersSnapshot() {
             placeId: p.placeId || null,
             jobId: p.jobId || null,
             lastSeen: p.lastSeen,
+            firstSeen: p.firstSeen,
+            sessions: p.sessions,
+            executor: p.executor || 'Unknown',
+            platform: p.platform || 'Unknown',
             ...roleFor(p.userId),
         }))
         .sort((a, b) => a.username.localeCompare(b.username));
+}
+
+const savedActiveWebhook = readJson(ACTIVE_WEBHOOK_FILE, {});
+let activeWebhookMessageId = savedActiveWebhook && typeof savedActiveWebhook === 'object' ? savedActiveWebhook.messageId || null : null;
+let activeWebhookSignature = null;
+let activeWebhookTimer = null;
+let activeWebhookBusy = false;
+
+function escapeDiscordText(value) {
+    return cleanStr(value, 100).replace(/@/g, '@\u200b').replace(/[\\`*_{}\[\]()#+\-.!|>~]/g, '\\$&');
+}
+
+function activeUsersWebhookBody(users) {
+    const knownIds = Object.keys(knownUsers);
+    const totalSessions = knownIds.reduce((total, id) => total + (Number(knownUsers[id]?.sessions) || 0), 0);
+    const rows = [];
+    for (const user of users) {
+        const name = escapeDiscordText(user.displayName || user.username || 'Unknown');
+        const id = cleanStr(user.userId, 24);
+        const client = `${escapeDiscordText(user.executor)} · ${escapeDiscordText(user.platform)}`;
+        const place = cleanStr(user.placeId, 24) || 'unknown';
+        const firstSeen = Number(user.firstSeen) || now();
+        const sessions = Number(user.sessions) || 0;
+        const line = `🟢 **${name}** · \`${id}\` · ${client} · place \`${place}\` · tracked since <t:${Math.floor(firstSeen / 1000)}:D> · ${sessions} run${sessions === 1 ? '' : 's'}`;
+        if (rows.join('\n').length + line.length + 1 > 3600) break;
+        rows.push(line);
+    }
+    const omitted = users.length - rows.length;
+    let description = users.length ? rows.join('\n') : 'No active users right now. The roster will update automatically when a session checks in.';
+    if (omitted > 0) description += `\n…and ${omitted} more active account${omitted === 1 ? '' : 's'}.`;
+    return {
+        allowed_mentions: { parse: [] },
+        embeds: [{
+            title: '🟢 Scorp · Live Users',
+            description: clip(description, 3900),
+            color: 0x36c98f,
+            fields: [
+                { name: 'Active now', value: String(users.length), inline: true },
+                { name: 'Known accounts', value: String(knownIds.length), inline: true },
+                { name: 'Recorded sessions', value: String(totalSessions), inline: true },
+            ],
+            timestamp: new Date().toISOString(),
+            footer: { text: 'Scorp · Live presence · discord.gg/scorp' },
+        }],
+    };
+}
+
+function activeUsersWebhookState() {
+    const users = activeUsersSnapshot();
+    const signature = JSON.stringify({
+        knownCount: Object.keys(knownUsers).length,
+        totalSessions: Object.values(knownUsers).reduce((total, user) => total + (Number(user && user.sessions) || 0), 0),
+        users: users.map(({ userId, username, displayName, placeId, jobId, firstSeen, sessions, executor, platform }) =>
+            ({ userId, username, displayName, placeId, jobId, firstSeen, sessions, executor, platform })),
+    });
+    return { users, signature };
+}
+
+async function deliverActiveUsersWebhook(body, attempt = 0) {
+    const editing = !!activeWebhookMessageId;
+    const url = editing ? webhookMessageUrl(activeWebhookMessageId) : webhookCreateUrl();
+    try {
+        const res = await fetch(url, {
+            method: editing ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(10000),
+        });
+        if (res.status === 429 && attempt < 3) {
+            const data = await res.json().catch(() => ({}));
+            await sleep((Number(data.retry_after) || 1) * 1000 + 250);
+            return deliverActiveUsersWebhook(body, attempt + 1);
+        }
+        if (editing && res.status === 404) {
+            activeWebhookMessageId = null;
+            try { fs.unlinkSync(ACTIVE_WEBHOOK_FILE); } catch { /* already absent */ }
+            return deliverActiveUsersWebhook(body, attempt + 1);
+        }
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            webhook.failed++;
+            webhook.lastError = `HTTP ${res.status}: ${clip(text, 160)}`;
+            console.error(`[webhook] live roster update failed: ${webhook.lastError}`);
+            return false;
+        }
+        if (!editing) {
+            const message = await res.json().catch(() => null);
+            if (!message || !message.id) {
+                webhook.failed++;
+                webhook.lastError = 'Discord did not return a message id for the live roster';
+                console.error(`[webhook] ${webhook.lastError}`);
+                return false;
+            }
+            activeWebhookMessageId = String(message.id);
+            try { writeJsonAtomic(ACTIVE_WEBHOOK_FILE, { messageId: activeWebhookMessageId }); }
+            catch (e) { console.error('[webhook] could not persist live roster message id:', e.message); }
+        }
+        webhook.sent++;
+        webhook.lastOkAt = new Date().toISOString();
+        return true;
+    } catch (e) {
+        webhook.failed++;
+        webhook.lastError = e.message;
+        console.error('[webhook] live roster request failed:', e.message);
+        return false;
+    }
+}
+
+async function refreshActiveUsersWebhook() {
+    if (!CONFIG.DISCORD_WEBHOOK) return;
+    if (activeWebhookBusy) { scheduleActiveUsersWebhook(); return; }
+    activeWebhookBusy = true;
+    try {
+        const { users, signature } = activeUsersWebhookState();
+        if (activeWebhookMessageId && signature === activeWebhookSignature) return;
+        if (await deliverActiveUsersWebhook(activeUsersWebhookBody(users))) activeWebhookSignature = signature;
+        else {
+            const retryTimer = setTimeout(scheduleActiveUsersWebhook, 30000);
+            retryTimer.unref();
+        }
+    } finally {
+        activeWebhookBusy = false;
+    }
+}
+
+function scheduleActiveUsersWebhook() {
+    if (!CONFIG.DISCORD_WEBHOOK || activeWebhookTimer) return;
+    activeWebhookTimer = setTimeout(() => {
+        activeWebhookTimer = null;
+        refreshActiveUsersWebhook();
+    }, 5000);
+    activeWebhookTimer.unref();
 }
 
 // Executor usage stats across all currently-tracked issued sessions
@@ -1459,6 +1671,19 @@ app.post('/api/panel/tag', requireToken, requirePanelAdmin, (req, res) => {
     try {
         const b = req.body || {};
         const userId = String(b.userId || '');
+        if (!isDigits(userId)) throw new tagconfig.TagError('userId must be numeric.');
+        if (b.role !== undefined && !ROLES.includes(String(b.role).toLowerCase())) {
+            throw new tagconfig.TagError(`role must be one of: ${ROLES.join(', ')}`);
+        }
+        // Validate every design field before writing role, entitlement, or tag data.
+        if (b.options && typeof b.options === 'object' && !Array.isArray(b.options)) {
+            let candidate = { ...((tags[userId] && tags[userId].overrides) || {}) };
+            for (const [key, value] of Object.entries(b.options)) {
+                if (key === 'theme') candidate = { ...candidate, ...tagconfig.themeOverrides(value) };
+                else candidate = tagconfig.applyOption(candidate, key, value);
+            }
+        }
+        if (b.role !== undefined) setRole(userId, String(b.role).toLowerCase(), b.label);
         if (b.tier === 'premium') setPaidTagTier(userId, true, b.reason || 'In-game admin panel', req.who.userId);
         else if (b.tier === 'free') setPaidTagTier(userId, false, b.reason || 'In-game admin panel', req.who.userId);
         if (b.options && typeof b.options === 'object' && !Array.isArray(b.options)) setTagOptions(userId, b.options);
@@ -1642,6 +1867,7 @@ function start() {
     const server = app.listen(CONFIG.PORT, () => {
         log(`Scorp server listening on :${CONFIG.PORT}  payload=${b ? b.id : 'NOT BUILT'}  data=${CONFIG.DATA_DIR}`);
         checkWebhookAtStartup();
+        scheduleActiveUsersWebhook();
         startDiscordBotIfConfigured();
     });
     return server;

@@ -14,6 +14,10 @@ Smart Anti-Tamper & HWID Banning: Our security system evaluates client environme
 
 Discord Integration: Manage user roles and custom tags, apply curated style packs, control paid-tag entitlements, review detailed tamper alerts, and manage account access from `/access` commands or the private button dashboard opened with `/panel`.
 
+The configured Discord webhook keeps one editable **Scorp · Live Users** message instead of posting a join alert for every execution. It refreshes from authenticated session heartbeats, lists only currently active accounts, and removes users after the presence timeout. Tracking dates and successful session counts are persisted in `DATA_DIR/known-users.json`, so returning accounts are recognized after a restart. History begins when this version first observes an account; older runs cannot be reconstructed. The webhook message ID is stored in `DATA_DIR/active-users-webhook.json` and is recreated if the message is deleted.
+
+Configured in-game staff can open the staff console to resolve a Roblox username to its account ID, select an active Scorp user in the same Roblox game server, copy their ID, review access lists, and run access actions. Nametag design supports role, displayed text, custom hex/RGB accent colors, a visual picker, and synchronized red/green/blue sliders. Username resolution calls Roblox from the backend and is staff-authenticated; the console's access checks remain server-authoritative.
+
 Moderation data is stored under `DATA_DIR` (`access.json`, `access-history.json`, `offenses.json`, and `paid-tags.json`). The allowlist only suppresses automatic tamper enforcement; an existing blacklist still blocks the account. Manual and automatic blacklist actions include reasons and are recorded in the moderation history.
 
 Set `ADMIN_ROBLOX_IDS` to a comma-separated list of trusted Roblox user IDs to authorize the in-game staff panel. `OWNER_USER_ID` is also authorized. Discord commands use `STAFF_DISCORD_IDS` when configured; otherwise they require the Discord Administrator permission.

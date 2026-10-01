@@ -771,7 +771,13 @@ function Library:CreateWindow(opts)
         local ws = Make("UIScale", { Parent = w, Scale = 0 })
         w.MouseEnter:Connect(function() self:_play("Hover"); Tween(ws, { Scale = 1.05 }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out) end)
         w.MouseLeave:Connect(function() Tween(ws, { Scale = 1 }, 0.15) end)
-        self:_drag(w, w, function() self:_play("Click"); self:Toggle() end)
+        self:_drag(w, w, function()
+            -- Ignore a click that began while the menu was closed but finished
+            -- after another input path opened it.
+            if self.Visible then return end
+            self:_play("Click")
+            self:Toggle()
+        end)
         Tween(ws, { Scale = 1 }, 0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         self._widget = w
         self._widgetScale = ws
@@ -781,6 +787,7 @@ function Library:CreateWindow(opts)
     -- ── Global keys ──
     self:_connect(UserInputService.InputBegan, function(input, gp)
         if gp or self._binding then return end
+        if input.UserInputType == Enum.UserInputType.Keyboard and UserInputService:GetFocusedTextBox() then return end
         if self.ToggleKey and input.KeyCode == self.ToggleKey then
             self:Toggle()
         elseif self.UnloadKey and input.KeyCode == self.UnloadKey then
@@ -824,11 +831,17 @@ function Window:Toggle(state)
     -- panel). Hiding it while open removes the conflict entirely.
     if self._widget then
         if state then
+            -- Hide synchronously rather than after the scale tween. During the old
+            -- fade-out window the button could remain hit-testable above the panel
+            -- and interpret a control click as another menu toggle.
+            self._widget.Active = false
+            self._widget.Visible = false
             Tween(self._widgetScale, { Scale = 0 }, 0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.In).Completed:Connect(function()
                 if self.Visible then self._widget.Visible = false end
             end)
         else
             self._widget.Visible = true
+            self._widget.Active = true
             Tween(self._widgetScale, { Scale = 1 }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         end
     end

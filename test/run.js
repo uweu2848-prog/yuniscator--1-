@@ -32,19 +32,38 @@ const section = t => console.log(`\n${t}`);
 // ── fake Discord ────────────────────────────────────────────────────────────
 function startFakeDiscord() {
     const received = [];
-    const state = { rateLimitNext: 0 };
+    const state = { rateLimitNext: 0, activeMessages: new Map(), activeEdits: [] };
+    let nextMessageId = 0;
     const server = http.createServer((req, res) => {
         if (req.method === 'GET') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ name: 'fake-hook' })); }
         let body = '';
         req.on('data', d => (body += d));
         req.on('end', () => {
-            if (state.rateLimitNext > 0) {
+            const url = new URL(req.url, 'http://localhost');
+            if (state.rateLimitNext > 0 && req.method === 'POST' && url.searchParams.get('wait') !== 'true') {
                 state.rateLimitNext--;
                 res.statusCode = 429;
                 res.setHeader('content-type', 'application/json');
                 return res.end(JSON.stringify({ retry_after: 0.2 }));
             }
-            try { received.push(JSON.parse(body).embeds[0]); } catch { /* ignore */ }
+            let payload;
+            try { payload = JSON.parse(body); received.push(payload.embeds[0]); } catch { /* ignore */ }
+            if (req.method === 'POST' && url.searchParams.get('wait') === 'true') {
+                const id = `fake-message-${++nextMessageId}`;
+                state.activeMessages.set(id, payload.embeds[0]);
+                res.statusCode = 200;
+                res.setHeader('content-type', 'application/json');
+                return res.end(JSON.stringify({ id, embeds: payload.embeds }));
+            }
+            if (req.method === 'PATCH' && /\/messages\/([^/]+)$/.test(url.pathname)) {
+                const id = decodeURIComponent(url.pathname.match(/\/messages\/([^/]+)$/)[1]);
+                if (!state.activeMessages.has(id)) { res.statusCode = 404; return res.end(); }
+                state.activeMessages.set(id, payload.embeds[0]);
+                state.activeEdits.push({ id, embed: payload.embeds[0] });
+                res.statusCode = 200;
+                res.setHeader('content-type', 'application/json');
+                return res.end(JSON.stringify({ id, embeds: payload.embeds }));
+            }
             res.statusCode = 204;
             res.end();
         });
@@ -163,8 +182,24 @@ async function testServer(d) {
         try {
             const joinUser = newUser({ userId: '9201', username: 'JoinNotice' });
             const joinSession = await post(joinServer.base, '/api/session', joinUser);
-            const joinNotice = await waitFor(() => d.received.some(e => e.title === '🟢 New Scorp user' && e.fields.some(f => f.name === 'Account' && f.value.includes(joinUser.userId))));
-            ok(!!joinSession.json.token && joinNotice, 'a newly issued session creates a concise per-user webhook notice');
+            await post(joinServer.base, '/api/heartbeat', { flags: [] }, bearer(joinSession.json.token));
+            const liveRoster = await waitFor(() => [...d.state.activeMessages.values()].some(e => e.title === '🟢 Scorp · Live Users' && e.description.includes(joinUser.username)));
+            const activeMessageFile = path.join(joinServer.dataDir, 'active-users-webhook.json');
+            await waitFor(() => fs.existsSync(activeMessageFile));
+            const messageId = fs.existsSync(activeMessageFile) ? JSON.parse(fs.readFileSync(activeMessageFile, 'utf8')).messageId : null;
+            const knownFile = path.join(joinServer.dataDir, 'known-users.json');
+            const firstRecord = JSON.parse(fs.readFileSync(knownFile, 'utf8'))[joinUser.userId];
+            ok(!!joinSession.json.token && liveRoster && messageId && firstRecord.sessions === 1, 'first use is recorded and appears in the consolidated live-user message');
+            await sleep(1300);
+            const returningSession = await post(joinServer.base, '/api/session', joinUser);
+            await post(joinServer.base, '/api/heartbeat', { flags: [] }, bearer(returningSession.json.token));
+            const editedRoster = await waitFor(() => d.state.activeEdits.some(edit => edit.id === messageId && edit.embed.description.includes(joinUser.username)));
+            const returningRecord = JSON.parse(fs.readFileSync(knownFile, 'utf8'))[joinUser.userId];
+            ok(editedRoster && returningRecord.sessions === 2 && returningRecord.firstSeen === firstRecord.firstSeen, 'returning use updates the same message without resetting first-seen history');
+            ok(!d.received.some(e => e.title === '🟢 New Scorp user'), 'script executions no longer emit per-user join messages');
+            await post(joinServer.base, '/api/nametags/leave', {}, bearer(returningSession.json.token));
+            const removedFromRoster = await waitFor(() => d.state.activeEdits.some(edit => edit.id === messageId && !edit.embed.description.includes(joinUser.username)));
+            ok(removedFromRoster, 'leaving removes the account from the same live-user message');
         } finally { joinServer.stop(); }
 
         section('Session handshake');
@@ -292,12 +327,17 @@ async function testServer(d) {
         const panelOverview = await panelOverviewRes.json();
         ok(panelOverviewRes.status === 200 && panelOverview.access && panelOverview.history, 'configured Roblox staff can load the in-game admin panel overview');
         ok((await fetch(`${base}/api/panel/overview`, { headers: bearer(tok.B) })).status === 403, 'non-staff Roblox sessions cannot access the in-game admin panel');
+        ok((await post(base, '/api/panel/resolve-user', { username: 'bad name' }, bearer(tok.A))).status === 400, 'username lookup validates Roblox username syntax before calling Roblox');
+        ok((await post(base, '/api/panel/resolve-user', { username: 'RobloxName' }, bearer(tok.B))).status === 403, 'username lookup is restricted to configured staff');
         const panelAuthAdmin = await (await fetch(`${base}/api/panel/authorize`, { headers: bearer(tok.A) })).json();
         const panelAuthUser = await (await fetch(`${base}/api/panel/authorize`, { headers: bearer(tok.B) })).json();
         ok(panelAuthAdmin.authorized === true && panelAuthUser.authorized === false, 'panel capability check exposes only the current session authorization result');
         const panelModule = await fetch(`${base}/api/panel/module`, { headers: bearer(tok.A) });
         const panelModuleCode = await panelModule.text();
         ok(panelModule.status === 200 && panelModule.headers.get('cache-control') === 'no-store' && !panelModuleCode.includes('Blacklist Permanently') && !panelModuleCode.includes('Staff Overview'), 'authorized staff receive only an uncached obfuscated panel module');
+        let panelModuleParses = true;
+        try { luaparse.parse(panelModuleCode, { luaVersion: '5.1' }); } catch { panelModuleParses = false; }
+        ok(panelModuleParses, 'updated staff console module remains valid Lua 5.1');
         const panelBan = await post(base, '/api/panel/blacklist', { userId: '9002', reason: 'panel moderation test', permanent: true }, bearer(tok.A));
         ok(panelBan.status === 200 && panelBan.json.entry.latestReason.reason === 'panel moderation test', 'authorized in-game panel can blacklist with an audited reason');
         await post(base, '/api/panel/unblacklist', { target: '9002' }, bearer(tok.A));
@@ -315,6 +355,14 @@ async function testServer(d) {
         const bob = roster.json.users.find(u => u.username === 'Bob');
         ok(bob.role === 'support' && bob.label === 'Scorp Trial Support' && bob.displayName === 'Bobby' && typeof bob.userId === 'number', 'roles + labels come from the server');
         ok(roster.json.users.find(u => u.username === 'Alice').role === 'member', 'default role is member');
+        const activeUsers = await (await fetch(`${base}/api/panel/active-users?jobId=J1`, { headers: bearer(tok.A) })).json();
+        ok(activeUsers.users.some(user => user.userId === A.userId && user.username === A.username) && !activeUsers.users.some(user => user.userId === C.userId), 'staff player picker lists script users in the same Roblox server only');
+        ok((await fetch(`${base}/api/panel/active-users`, { headers: bearer(tok.B) })).status === 403, 'current active-user list is staff-only');
+        const panelTag = await post(base, '/api/panel/tag', { userId: C.userId, role: 'vip', label: 'Scorp Guide', tier: 'premium', options: { label: 'Scorp Guide', primary: '#33aaff' } }, bearer(tok.A));
+        ok(panelTag.status === 200 && panelTag.json.tag.role === 'vip' && panelTag.json.tag.effective.label === 'Scorp Guide' && panelTag.json.tag.effective.primary === '#33aaff', 'staff can assign role, display text, and a custom accent color together');
+        const invalidPanelTag = await post(base, '/api/panel/tag', { userId: C.userId, role: 'admin', options: { primary: 'not-a-color' } }, bearer(tok.A));
+        const rolesAfterInvalidTag = await (await fetch(`${base}/api/admin/roles`, { headers: admin })).json();
+        ok(invalidPanelTag.status === 400 && rolesAfterInvalidTag.roles[C.userId].role === 'vip', 'invalid tag colors do not partially change a user role');
         const boss = await post(base, '/api/session', { userId: '1000', username: 'Boss', hwid: 'BOSS-HW-3', ownerKey: 'owner-secret' });
         const bossSync = await post(base, '/api/nametags/sync', { jobId: 'J1' }, bearer(boss.json.token));
         ok(bossSync.json.users.find(u => u.username === 'Boss').role === 'owner', 'OWNER_USER_ID gets the Owner role by default');
