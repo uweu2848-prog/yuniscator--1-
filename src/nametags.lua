@@ -382,19 +382,18 @@ local function applyTextAnimation(titleLabel, kind, baseColor)
         }, titleLabel)
         TweenService:Create(grad, TweenInfo.new(1.6, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Offset = Vector2.new(1, 0) }):Play()
     elseif kind == "rainbow" then
-        local grad = make("UIGradient", { Color = ColorSequence.new(Color3.fromHSV(0, 1, 1), Color3.fromHSV(1, 1, 1)) })
-        grad.Parent = titleLabel
-        task.spawn(function()
-            local t = 0
-            while titleLabel.Parent do
-                t = (t + 0.01) % 1
-                grad.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromHSV(t, 1, 1)),
-                    ColorSequenceKeypoint.new(1, Color3.fromHSV((t + 0.4) % 1, 1, 1)),
-                })
-                task.wait(0.05)
-            end
-        end)
+        -- Animate a GPU-backed gradient instead of rebuilding ColorSequences in
+        -- a 20 Hz Lua loop for every visible tag.
+        local rainbow = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 1, 1)),
+            ColorSequenceKeypoint.new(0.2, Color3.fromHSV(0.2, 1, 1)),
+            ColorSequenceKeypoint.new(0.4, Color3.fromHSV(0.4, 1, 1)),
+            ColorSequenceKeypoint.new(0.6, Color3.fromHSV(0.6, 1, 1)),
+            ColorSequenceKeypoint.new(0.8, Color3.fromHSV(0.8, 1, 1)),
+            ColorSequenceKeypoint.new(1, Color3.fromHSV(1, 1, 1)),
+        })
+        local grad = make("UIGradient", { Color = rainbow, Rotation = 0 }, titleLabel)
+        TweenService:Create(grad, TweenInfo.new(4.5, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = 360 }):Play()
     elseif kind == "wave" then
         TweenService:Create(
             titleLabel, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
@@ -487,6 +486,23 @@ local function buildTag(userId, info, head, previewParent)
             Name = "Background", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
             Image = T.background, ImageColor3 = toColor3(T.backgroundImageColor), ScaleType = Enum.ScaleType.Crop, ZIndex = 0,
         }, card)
+    end
+    if T.effects and (T.textAnimation ~= "default" or T.particles or T.glitch or T.underlineSweep) then
+        local sheen = make("Frame", {
+            Name = "Sheen", Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE,
+            BackgroundTransparency = 0.94, BorderSizePixel = 0, ZIndex = 1,
+        }, card)
+        make("UICorner", { CornerRadius = UDim.new(0, 13) }, sheen)
+        local sheenGradient = make("UIGradient", {
+            Rotation = 18,
+            Color = ColorSequence.new(toColor3(T.highlightColor), toColor3(T.accentB)),
+            Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.42, 0.92),
+                NumberSequenceKeypoint.new(0.5, 0.48), NumberSequenceKeypoint.new(0.58, 0.92),
+                NumberSequenceKeypoint.new(1, 1),
+            }),
+        }, sheen)
+        TweenService:Create(sheenGradient, TweenInfo.new(5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1), { Offset = Vector2.new(1.2, 0) }):Play()
     end
     if T.pulse then
         TweenService:Create(card, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { BackgroundTransparency = 0.18 }):Play()

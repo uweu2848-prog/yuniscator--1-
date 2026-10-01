@@ -402,6 +402,11 @@ local ctx = {
     request = requestFunc,
     loadstring = capturedLoadstring,
     lib = data.lib,
+    build = data.build,
+    watermark = data.watermark,
+    releaseChannel = data.releaseChannel,
+    releaseVersion = data.releaseVersion,
+    releaseNotes = data.releaseNotes,
 }
 
 local ranOk, runErr = pcall(payloadFn, ctx)
@@ -414,9 +419,10 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 if not ctx.token then return end -- stalled (banned) session: nothing to check in
 
-local function revoke()
-    warn("[Loader] session revoked.")
-    if ctx.revoke then pcall(ctx.revoke) end
+local function revoke(message, updateRequired)
+    message = message or "Your Scorp session was revoked."
+    warn("[Loader] " .. tostring(message))
+    if ctx.revoke then pcall(ctx.revoke, message, updateRequired == true) end
 end
 
 task.spawn(function()
@@ -424,11 +430,16 @@ task.spawn(function()
     task.wait(2) -- first check-in quickly, so the server knows this session is alive
     while true do
         local hb, hbScore = runChecks()
-        local r = call("/api/heartbeat", { flags = hb }, ctx.token)
+        local r = call("/api/heartbeat", { flags = hb, build = ctx.build, watermark = ctx.watermark }, ctx.token)
         local status = r and r.StatusCode
 
         if status == 403 or hbScore >= BLOCK_SCORE then
-            revoke()
+            local reply = decode(r)
+            if reply and reply.updateRequired then
+                revoke(reply.updateMessage or "Scorp was updated. Relaunch the latest loader to continue.", true)
+            else
+                revoke()
+            end
             break
         elseif status == 401 then
             -- token expired, or the server restarted with a new secret: quietly get a new one
@@ -437,6 +448,10 @@ task.spawn(function()
             if rr and rr.StatusCode == 200 and d2 and d2.ok then
                 if d2.token then
                     ctx.token = d2.token
+                    ctx.build = d2.build or ctx.build
+                    ctx.watermark = d2.watermark or ctx.watermark
+                    ctx.releaseChannel = d2.releaseChannel or ctx.releaseChannel
+                    ctx.releaseVersion = d2.releaseVersion or ctx.releaseVersion
                 else
                     revoke()
                     break

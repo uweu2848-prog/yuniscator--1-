@@ -3,7 +3,12 @@ return function(H)
     H.runLoader()
     H.advance(3)
 
-    local out = { hasPreviewHolder = #H.customFrames >= 1 }
+    local out = { hasPreviewHolder = #H.customFrames >= 1, hasFreeNameTagsTab = false }
+    for _, name in ipairs(H.createdTabs or {}) do
+        if name == "Free Name Tags" then out.hasFreeNameTagsTab = true end
+    end
+    out.hasStaffPanelButton = H.controls["Admin Panel · Staff"] ~= nil
+    out.toggleKeyHasConfigFlag = H.controls["Menu Toggle Key"] and H.controls["Menu Toggle Key"].Flag == "menu_toggle_key"
     local holder = H.customFrames[1]
     local function preview()
         H.advance(1) -- past the editor's 0.12 s debounce
@@ -32,9 +37,7 @@ return function(H)
     out.afterReset = preview()
     out.resetFontStyle = H.controlObjs["Font Style:"].value
     out.resetEffectPack = H.controlObjs["Effect Pack:"].value
-    H.controls["Free Name Tags"].Callback()
-    out.popoutTitle = H.popoutTitle
-    out.popoutOpened = H.popoutShown
+    out.hasFreeNameTagsShortcutInSettings = H.controls["Free Name Tags"] ~= nil
 
     H.window:Destroy()
     H.result(out)

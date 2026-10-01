@@ -327,7 +327,12 @@ function Tab:Hide() H.popoutShown = false end
 local Window = setmetatable({ Theme = theme, ToggleKey = { Name = "RightShift" }, Flags = {} }, { __index = function(_, k)
     return function(_, ...) return generic() end
 end })
-function Window:CreateTab() return Tab end
+function Window:CreateTab(name)
+    H.createdTabs = H.createdTabs or {}
+    H.createdTabs[#H.createdTabs + 1] = name
+    return Tab
+end
+function Window:SelectTab(tab) H.selectedTab = tab.Name or "selected" end
 function Window:CreatePopout(opts)
     H.popoutTitle = opts and opts.Title
     return Tab

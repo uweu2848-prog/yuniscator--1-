@@ -18,6 +18,16 @@ Moderation data is stored under `DATA_DIR` (`access.json`, `access-history.json`
 
 Set `ADMIN_ROBLOX_IDS` to a comma-separated list of trusted Roblox user IDs to authorize the in-game staff panel. `OWNER_USER_ID` is also authorized. Discord commands use `STAFF_DISCORD_IDS` when configured; otherwise they require the Discord Administrator permission.
 
+The in-game admin panel source is excluded from the public payload bundle. After authorization, the client fetches a separately obfuscated module from the backend; non-admin sessions cannot download it and get no panel button. The free name-tag editor is available as its own main-window tab. The menu toggle key is stored in the executor's `Scorp/default.json` config when file APIs are available and restored automatically on next launch. Code delivered to an authorized client can still be inspected; the server remains authoritative for every admin action.
+
+## Releases and build verification
+
+Run `npm run build:verify` before publishing. It writes `dist/script.lua`, parses the artifact as Lua 5.1, and checks representative plaintext markers. This verifies the local build only. The Roblox loader URL fetches `/loader.lua`; the running server builds/serves the payload during session creation. After deployment, check `/api/health` for the live `build.id`, `releaseChannel`, and `releaseVersion`.
+
+Keep production and development in separate server deployments with separate loader URLs, `DATA_DIR`, `SESSION_SECRET`, `ADMIN_PASSWORD`, `OWNER_KEY`, and webhook settings. Configure production with `RELEASE_CHANNEL=production`; configure the test deployment with `RELEASE_CHANNEL=development`. Set `RELEASE_VERSION` and optional `RELEASE_NOTES` on each. Do not point public users at the development loader. Session tokens are bound to both channel and build, so a changed release causes the old client to show an update notice, stop Scorp features, and unload its UI after 30 seconds; it does not kick the player from their Roblox game.
+
 Nametag identity is always the player's Roblox display name, followed by `discord.gg/scorp`. Custom tag label text is staff-controlled. Free users may choose the available preset palette/font/effect combinations; staff-managed premium tags require an explicit premium entitlement and cannot be overwritten from the free editor.
 
 Client-side tamper checks and Lua obfuscation are deterrence/telemetry, not guarantees: any client-delivered code can eventually be inspected or modified. The authoritative controls are server-side access decisions, session checks, and the admin/Discord allowlist and blacklist.
+
+Session tokens are bound to the current server build; deploying a new build revokes heartbeats from older builds so clients must relaunch. Each account also receives an account-scoped HMAC watermark encoded into its personalized payload. Staff can resolve a recovered marker with the authenticated `/api/admin/watermarks/:marker` route. The marker contains no credentials or direct user ID; it supports attribution only and can still be removed by someone modifying the client.

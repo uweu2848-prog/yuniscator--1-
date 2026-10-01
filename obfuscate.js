@@ -446,6 +446,14 @@ if (require.main === module) {
         const b = build();
         console.log(`[build] ${new Date().toLocaleTimeString()}  id=${b.id}  ${(b.bytes / 1024).toFixed(1)} KB  ` +
             `${b.sources.join(', ')}  (${Date.now() - t0} ms)  → dist/script.lua`);
+        if (process.argv.includes('--verify')) {
+            const shipped = fs.readFileSync(OUT_FILE, 'utf8');
+            luaparse.parse(shipped, PARSE);
+            const markers = ['SCORP UI LIBRARY', 'Placeholder Feature', '/api/nametags/sync', 'Authorization'];
+            const leaked = markers.filter(marker => shipped.includes(marker));
+            if (leaked.length) throw new Error(`verification found readable source markers: ${leaked.join(', ')}`);
+            console.log(`[verify] dist/script.lua parses as Lua 5.1; checked ${markers.length} readable source markers; build=${b.id}`);
+        }
     };
     try { run(); } catch (e) { console.error('[build] FAILED:', e.message); process.exit(1); }
 

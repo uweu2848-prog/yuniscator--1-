@@ -1026,10 +1026,12 @@ function Window:LoadConfig(name)
     if not isfile(path) then return false, "config not found" end
     local ok, data = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
     if not ok then return false, "config is corrupted" end
+    self._loadingConfig = true
     for flag, raw in pairs(data) do
         local setter = self._setters[flag]
         if setter then pcall(setter, DecodeFlag(raw)) end
     end
+    self._loadingConfig = false
     return true
 end
 
@@ -1665,7 +1667,11 @@ function Section:AddKeybind(name, o)
         Fire(o.OnChange, k)
     end)
     local obj = { Frame = row }
-    function obj:Set(k, silent) bind.Set(k, silent); if o.Flag then win.Flags[o.Flag] = k or false end end
+    function obj:Set(k, silent)
+        bind.Set(k, silent)
+        if o.Flag then win.Flags[o.Flag] = k or false end
+        if silent then Fire(o.OnChange, k) end
+    end
     function obj:Get() return bind.Get() end
     win:_connect(UserInputService.InputBegan, function(input, gp)
         local k = bind.Get()

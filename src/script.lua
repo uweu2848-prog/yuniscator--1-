@@ -29,10 +29,8 @@ local TagEditor = (function()
 --@include tageditor.lua
 end)()
 
--- Staff-only panel UI; every privileged action is independently authorized by the server.
-local AdminPanel = (function()
---@include adminpanel.lua
-end)()
+-- Staff-panel code is fetched separately only after the server authorizes this session.
+local AdminPanel = nil
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  UI library (delivered by the server over the authenticated session)
@@ -65,7 +63,47 @@ local Window = Scorp:CreateWindow({
 assert(type(Window) == "table" and type(Window.CreateTab) == "function",
     "[Scorp] incompatible UI library: Window:CreateTab is missing. Deploy/restart the server with src/ScorpLib.lua.")
 
-Window:SetWatermark('<font color="rgb(168,186,214)">Scorp</font>  ·  placeholder build')
+-- Ask the authenticated server whether this session is a configured staff ID.
+-- Do not construct or attach any staff UI when the answer is missing/negative.
+local staffAuthorized = false
+do
+    local ok, response = pcall(ctx.request, {
+        Url = ctx.server .. "/api/panel/authorize",
+        Method = "GET",
+        Headers = { ["Authorization"] = "Bearer " .. tostring(ctx.token) },
+    })
+    if ok and type(response) == "table" and response.StatusCode == 200 then
+        local decoded, data = pcall(function()
+            return game:GetService("HttpService"):JSONDecode(response.Body or "")
+        end)
+        staffAuthorized = decoded and type(data) == "table" and data.authorized == true
+    end
+    if staffAuthorized then
+        local moduleOk, moduleResponse = pcall(ctx.request, {
+            Url = ctx.server .. "/api/panel/module",
+            Method = "GET",
+            Headers = { ["Authorization"] = "Bearer " .. tostring(ctx.token) },
+        })
+        if moduleOk and type(moduleResponse) == "table" and moduleResponse.StatusCode == 200 and type(moduleResponse.Body) == "string" then
+            local moduleFn, moduleErr = ctx.loadstring(moduleResponse.Body)
+            if moduleFn then
+                local loadedOk, module = pcall(moduleFn)
+                if loadedOk and type(module) == "table" and type(module.Build) == "function" then
+                    AdminPanel = module
+                else
+                    warn("[Scorp] authorized admin module failed to initialize: " .. tostring(module))
+                end
+            else
+                warn("[Scorp] authorized admin module failed to compile: " .. tostring(moduleErr))
+            end
+        else
+            warn("[Scorp] authorized admin module could not be fetched.")
+        end
+    end
+end
+
+Window:SetWatermark(('<font color="rgb(168,186,214)">Scorp</font>  ·  %s %s'):format(
+    tostring(ctx.releaseChannel or "production"), tostring(ctx.releaseVersion or ctx.build or "unversioned")))
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Home
@@ -155,9 +193,10 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 --  Settings
 -- ───────────────────────────────────────────────────────────────────────────
--- The curated free-tier tag editor opens as a popout from the main Scorp window.
+-- The free-tier editor owns a dedicated sidebar tab; staff controls are only
+-- constructed after the server authorizes this session.
 local Editor = TagEditor.Build(Window, Nametags)
-local StaffPanel = AdminPanel.Build(Window, ctx)
+local StaffPanel = staffAuthorized and AdminPanel and AdminPanel.Build(Window, ctx) or nil
 
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
@@ -166,10 +205,19 @@ Window:AddConfigControls(Settings, "💾 Configs")
 
 do
     local sec = Settings:CreateSection("Menu", true)
-    sec:AddKeybind("Menu Toggle Key", {
+    local menuToggle = sec:AddKeybind("Menu Toggle Key", {
         Default  = Window.ToggleKey,
-        OnChange = function(key) Window:SetToggleKey(key) end,
+        Flag = "menu_toggle_key",
+        OnChange = function(key)
+            Window:SetToggleKey(key)
+            if not Window._loadingConfig then pcall(function() Window:SaveConfig("default") end) end
+        end,
     })
+    -- Config loading can only restore registered flags, so register first, then
+    -- automatically restore the user's last saved default config if one exists.
+    Window:_updateHint()
+    local loaded = Window:LoadConfig("default")
+    if loaded then Window:SetToggleKey(Window.Flags.menu_toggle_key or nil) end
 end
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -200,26 +248,32 @@ do
         Nametags.Refresh()
         Window:Notify("Nametags", "Refreshing…", 2)
     end)
-    sec:AddButton("Free Name Tags", function()
-        Editor.Open()
-    end)
-    sec:AddButton("Admin Panel · Staff", function()
-        StaffPanel.Open()
-    end)
+    if StaffPanel then
+        sec:AddButton("Open Admin Panel · Staff", function() StaffPanel.Open() end)
+    end
 end
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Session hooks + cleanup
 -- ───────────────────────────────────────────────────────────────────────────
 -- The loader calls this if the server revokes the session mid-run.
-ctx.revoke = function()
+ctx.revoke = function(message, updateRequired)
+    if updateRequired then
+        pcall(Editor.Destroy)
+        if StaffPanel then pcall(StaffPanel.Destroy) end
+        pcall(Nametags.Stop)
+        pcall(function() Window:Toggle(true) end)
+        pcall(function() Window:Notify("Update Required", tostring(message or "Scorp was updated. Relaunch the latest loader to continue."), 30, Window.Theme.Warning) end)
+        task.delay(30.5, function() pcall(function() Window:Destroy(true) end) end)
+        return
+    end
     pcall(function() Window:Destroy(true) end)
 end
 
 Window:OnUnload(function()
     print("[Scorp] unloaded")
     pcall(Editor.Destroy)
-    pcall(StaffPanel.Destroy)
+    if StaffPanel then pcall(StaffPanel.Destroy) end
     Nametags.Stop()
 end)
 

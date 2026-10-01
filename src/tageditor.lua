@@ -82,7 +82,7 @@ function TagEditor.Build(Window, Nametags)
         rebuildPreview()
     end
 
-    local tab = Window:CreatePopout({ Name = "FreeNameTags", Title = "Free Name Tags", Size = UDim2.fromOffset(500, 650) })
+    local tab = Window:CreateTab("Free Name Tags", { Icon = "🏷️" })
 
     do
         local sec = tab:CreateSection("Free Name Tags", true)
@@ -169,12 +169,15 @@ function TagEditor.Build(Window, Nametags)
     rebuildPreview()
 
     local api = {}
-    function api.Open() tab:Show() end
+    function api.Open()
+        Window:Toggle(true)
+        Window:SelectTab(tab)
+    end
     function api.GetDraft() return draft end
     function api.Export() return Nametags.Export(draft) end
     function api.Destroy()
         if previewTween then pcall(function() previewTween:Cancel() end) previewTween = nil end
-        pcall(function() tab:Hide() end)
+        -- This tab belongs to the main window; cleanup only its preview and draft overlay.
         Nametags.PreviewTag(nil)
     end
     return api

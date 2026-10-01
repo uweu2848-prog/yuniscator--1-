@@ -45,6 +45,7 @@ const tagconfig = require('./tagconfig');
 const env = process.env;
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const flag = (v, d) => (v === undefined || v === '' ? d : !/^(0|false|no|off)$/i.test(v));
+const releaseChannel = String(env.RELEASE_CHANNEL || 'production').trim().toLowerCase();
 
 const CONFIG = {
     PORT: num(env.PORT, 3000),
@@ -61,6 +62,9 @@ const CONFIG = {
     STAFF_DISCORD_IDS: (env.STAFF_DISCORD_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
     DATA_DIR: env.DATA_DIR ? path.resolve(env.DATA_DIR) : path.join(ROOT, 'data'),
     SESSION_SECRET: env.SESSION_SECRET || '',
+    RELEASE_CHANNEL: releaseChannel === 'development' ? 'development' : 'production',
+    RELEASE_VERSION: String(env.RELEASE_VERSION || 'unversioned').trim().slice(0, 40),
+    RELEASE_NOTES: String(env.RELEASE_NOTES || '').trim().slice(0, 1000),
     TRUST_PROXY_HOPS: num(env.TRUST_PROXY_HOPS, 1), // Railway = 1 proxy hop. NEVER use `true`: clients could forge X-Forwarded-For.
 
     HEARTBEAT_SECONDS: num(env.HEARTBEAT_SECONDS, 30),
@@ -108,6 +112,7 @@ const ACCESS_FILE = path.join(CONFIG.DATA_DIR, 'access.json');
 const ACCESS_HISTORY_FILE = path.join(CONFIG.DATA_DIR, 'access-history.json');
 const SECRET_FILE = path.join(CONFIG.DATA_DIR, 'session.key');
 const LIB_FILE = path.join(ROOT, 'src', 'ScorpLib.lua');
+const ADMIN_PANEL_FILE = path.join(ROOT, 'src', 'adminpanel.lua');
 const LOADER_FILE = path.join(ROOT, 'loader.lua');
 
 // Secrets that were not provided
@@ -333,6 +338,41 @@ function getLib() {
     const m = fs.statSync(LIB_FILE).mtimeMs;
     if (m !== libCache.mtime) libCache = { mtime: m, text: fs.readFileSync(LIB_FILE, 'utf8') };
     return libCache.text;
+}
+
+let adminPanelCache = { mtime: 0, code: '' };
+function getAdminPanelModule() {
+    const mtime = fs.statSync(ADMIN_PANEL_FILE).mtimeMs;
+    if (mtime !== adminPanelCache.mtime) {
+        const source = fs.readFileSync(ADMIN_PANEL_FILE, 'utf8').replace(/\r\n/g, '\n');
+        adminPanelCache = { mtime, code: obf.obfuscateSource(source, 'adminpanel.lua') };
+    }
+    return adminPanelCache.code;
+}
+
+const personalizedBuildCache = new Map();
+function getPersonalizedBuild(userId, baseBuild) {
+    userId = String(userId);
+    const cacheKey = `${baseBuild.id}:${userId}`;
+    const hit = personalizedBuildCache.get(cacheKey);
+    if (hit) {
+        personalizedBuildCache.delete(cacheKey);
+        personalizedBuildCache.set(cacheKey, hit);
+        return hit;
+    }
+
+    const digest = crypto.createHmac('sha256', SECRET).update(`${baseBuild.id}:${userId}`).digest('base64url').slice(0, 12);
+    const watermark = `SC-${digest}`;
+    // A tiny harmless prefix personalizes the delivered blob without rerunning
+    // the full Lua obfuscation pipeline for every login. The numeric bytes are
+    // a tracing marker, not a secret or an authorization credential.
+    const markerBytes = [...Buffer.from(watermark, 'utf8')].join(',');
+    const prefix = `local _scorp_ctx = ...; if type(_scorp_ctx) == "table" then _scorp_ctx.watermark = string.char(${markerBytes}) end;\n`;
+    const code = prefix + baseBuild.code;
+    const personalized = { ...baseBuild, code, bytes: Buffer.byteLength(code), watermark };
+    personalizedBuildCache.set(cacheKey, personalized);
+    if (personalizedBuildCache.size > 256) personalizedBuildCache.delete(personalizedBuildCache.keys().next().value);
+    return personalized;
 }
 
 const loaderCache = new Map(); // baseUrl -> { mtime, code }
@@ -708,6 +748,7 @@ function alertIdentityFields(who) {
         { name: 'Executor / platform', value: `${value(session.executor || who.executor)} · ${value(session.platform || who.platform)}`, inline: true },
         { name: 'Place / server', value: `${value(session.placeId || who.placeId)} · ${value(session.jobId || who.jobId)}`, inline: false },
         { name: 'Session', value: `${value(who.nonce)} · ${session.confirmed ? 'confirmed' : 'not confirmed'}`, inline: false },
+        { name: 'Customer marker', value: value(session.watermark), inline: true },
         { name: 'HWID', value: value(who.hwid), inline: true },
         { name: 'IP', value: value(who.ip), inline: true },
         { name: 'Build', value: value(session.buildId || (b && b.id)), inline: true },
@@ -869,6 +910,25 @@ function requireToken(req, res, next) {
     const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
     const claims = m && verifyToken(m[1]);
     if (!claims) return res.status(401).json({ ok: false, error: 'bad token' });
+    const currentBuild = ensureBuilt();
+    if (!currentBuild) return res.status(503).json({ ok: false, error: 'payload unavailable' });
+    const channelMismatch = claims.c !== CONFIG.RELEASE_CHANNEL;
+    const versionMismatch = claims.rv !== CONFIG.RELEASE_VERSION;
+    if (claims.b !== currentBuild.id || channelMismatch || versionMismatch) {
+        const note = CONFIG.RELEASE_NOTES ? ` ${CONFIG.RELEASE_NOTES}` : '';
+        const channelMessage = channelMismatch
+            ? `This session is for the ${claims.c || 'unknown'} channel; this server runs ${CONFIG.RELEASE_CHANNEL}. Use the matching loader.`
+            : `Scorp ${CONFIG.RELEASE_CHANNEL} ${CONFIG.RELEASE_VERSION} has been updated. Relaunch the latest loader to continue.`;
+        return res.status(403).json({
+            ok: false,
+            revoked: true,
+            updateRequired: true,
+            build: currentBuild.id,
+            releaseChannel: CONFIG.RELEASE_CHANNEL,
+            releaseVersion: CONFIG.RELEASE_VERSION,
+            updateMessage: `${channelMessage}${note}`,
+        });
+    }
     req.claims = claims;
     req.who = whoFromToken(req, claims);
     if (!req.who.ownerOk) {
@@ -887,6 +947,19 @@ function requirePanelAdmin(req, res, next) {
     next();
 }
 
+app.get('/api/panel/authorize', requireToken, (req, res) => {
+    res.json({ ok: true, authorized: panelAdminIds.has(String(req.claims.u)) });
+});
+
+app.get('/api/panel/module', requireToken, requirePanelAdmin, (req, res) => {
+    try {
+        res.type('text/plain').set('Cache-Control', 'no-store').send(getAdminPanelModule());
+    } catch (e) {
+        console.error('[panel] could not build authorized module:', e.message);
+        res.status(503).json({ ok: false, error: 'Staff panel module is temporarily unavailable.' });
+    }
+});
+
 // ── Public ──────────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.type('text/plain').send('ok'));
 
@@ -896,6 +969,9 @@ app.get('/api/health', (_req, res) => {
         ok: true,
         uptimeSeconds: Math.round(process.uptime()),
         build: b ? { id: b.id, builtAt: b.builtAt, kb: Math.round(b.bytes / 102.4) / 10 } : null,
+        releaseChannel: CONFIG.RELEASE_CHANNEL,
+        releaseVersion: CONFIG.RELEASE_VERSION,
+        releaseNotes: CONFIG.RELEASE_NOTES || null,
         buildError,
         webhook: { configured: !!CONFIG.DISCORD_WEBHOOK, sent: webhook.sent, failed: webhook.failed, lastError: webhook.lastError, lastOkAt: webhook.lastOkAt },
         ownerKeySet: !!CONFIG.OWNER_KEY,
@@ -943,11 +1019,20 @@ app.post('/api/session', sessionLimiter, (req, res) => {
     who.nonce = nonce;
     if (handleFlags(who, b.flags, 'session start')) return decoy();
 
-    const claims = { v: 1, n: nonce, u: userId, nm: username, h: hwid, iat: now(), exp: now() + CONFIG.TOKEN_TTL_MS, ok: ownerOk ? 1 : 0 };
-    const token = signToken(claims);
-    issued.set(nonce, { userId, username, hwid, ip, executor, platform, jobId, placeId, buildId: (getBuild() || {}).id || null, issuedAt: now(), confirmed: !!b.resume, alerted: false, ownerOk });
+    const build = ensureBuilt();
+    if (!build) return res.status(503).json({ ok: false, error: 'payload not built yet' });
+    let personalized;
+    try { personalized = getPersonalizedBuild(userId, build); }
+    catch (e) {
+        console.error('[build] personalized payload failed:', e.message);
+        return res.status(503).json({ ok: false, error: 'payload personalization failed' });
+    }
 
-    if (b.resume) return res.json({ ok: true, token, hb: CONFIG.HEARTBEAT_SECONDS });
+    const claims = { v: 1, n: nonce, u: userId, nm: username, h: hwid, b: build.id, c: CONFIG.RELEASE_CHANNEL, rv: CONFIG.RELEASE_VERSION, iat: now(), exp: now() + CONFIG.TOKEN_TTL_MS, ok: ownerOk ? 1 : 0 };
+    const token = signToken(claims);
+    issued.set(nonce, { userId, username, hwid, ip, executor, platform, jobId, placeId, buildId: build.id, releaseChannel: CONFIG.RELEASE_CHANNEL, releaseVersion: CONFIG.RELEASE_VERSION, watermark: personalized.watermark, issuedAt: now(), confirmed: !!b.resume, alerted: false, ownerOk });
+
+    if (b.resume) return res.json({ ok: true, token, hb: CONFIG.HEARTBEAT_SECONDS, build: build.id, watermark: personalized.watermark, releaseChannel: CONFIG.RELEASE_CHANNEL, releaseVersion: CONFIG.RELEASE_VERSION });
 
     // A fresh (non-resume) session means someone just ran the script for the first time
     // this session. Optional — off by default so you're not pinged on every single join.
@@ -963,9 +1048,7 @@ app.post('/api/session', sessionLimiter, (req, res) => {
         });
     }
 
-    const build = ensureBuilt();
-    if (!build) return res.status(503).json({ ok: false, error: 'payload not built yet' });
-    res.json({ ok: true, token, payload: build.code, lib: getLib(), hb: CONFIG.HEARTBEAT_SECONDS, build: build.id });
+    res.json({ ok: true, token, payload: personalized.code, lib: getLib(), hb: CONFIG.HEARTBEAT_SECONDS, build: build.id, watermark: personalized.watermark, releaseChannel: CONFIG.RELEASE_CHANNEL, releaseVersion: CONFIG.RELEASE_VERSION, releaseNotes: CONFIG.RELEASE_NOTES || null });
 });
 
 app.post('/api/heartbeat', requireToken, (req, res) => {
@@ -1113,6 +1196,8 @@ app.get('/api/admin/sessions', (_req, res) => {
                 placeId: p.placeId || null,
                 executor: s.executor || 'Unknown',
                 platform: s.platform || 'Unknown',
+                buildId: s.buildId || null,
+                watermark: s.watermark || null,
                 joinedAgo: s.issuedAt ? Math.round((t - s.issuedAt) / 1000) : null,
                 ...roleFor(p.userId),
             };
@@ -1155,6 +1240,8 @@ app.get('/api/admin/history', (req, res) => {
             username: s.username,
             executor: s.executor || 'Unknown',
             platform: s.platform || 'Unknown',
+            buildId: s.buildId || null,
+            watermark: s.watermark || null,
             ip: s.ip,
             hwid: s.hwid,
             issuedAt: s.issuedAt,
@@ -1163,6 +1250,21 @@ app.get('/api/admin/history', (req, res) => {
             confirmed: s.confirmed,
             ownerOk: s.ownerOk,
         })),
+    });
+});
+
+app.get('/api/admin/watermarks/:marker', (req, res) => {
+    const marker = cleanStr(req.params.marker, 32);
+    const session = [...issued.values(), ...sessionHistory].find(s => s.watermark === marker);
+    if (!session) return res.status(404).json({ found: false });
+    res.json({
+        found: true,
+        userId: session.userId,
+        username: session.username,
+        buildId: session.buildId || null,
+        watermark: session.watermark,
+        issuedAt: session.issuedAt || null,
+        endedAt: session.endedAt || null,
     });
 });
 
@@ -1315,6 +1417,7 @@ app.get('/api/panel/overview', requireToken, requirePanelAdmin, (_req, res) => {
         sessions: { tracked: issued.size, unconfirmed: [...issued.values()].filter(s => !s.confirmed).length },
         access: moderationSnapshot(),
         history: accessHistory.slice(-25).reverse(),
+        activeWatermarks: [...issued.values()].filter(s => s.watermark).map(s => ({ userId: s.userId, watermark: s.watermark, buildId: s.buildId })),
         paidTags: Object.entries(paidTags).filter(([, v]) => v && v.enabled).map(([userId, value]) => ({ userId, ...value })),
         tagCount: Object.keys(tags).length,
         webhook: { configured: !!CONFIG.DISCORD_WEBHOOK, sent: webhook.sent, failed: webhook.failed },
