@@ -34,6 +34,15 @@ const tagconfig = require('./tagconfig');
 const { buildTagEmbed, makeRobloxLookup } = require('./tag-embed');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
+const BAN_DURATION_SECONDS = { '1h': 3600, '6h': 21600, '1d': 86400, '7d': 604800, '30d': 2592000 };
+
+function banDurationOptions(raw, permanentFallback = false) {
+    const duration = String(raw || '').trim().toLowerCase();
+    if (!duration || duration === 'tiered') return { permanent: permanentFallback };
+    if (duration === 'permanent') return { permanent: true };
+    if (BAN_DURATION_SECONDS[duration]) return { durationSeconds: BAN_DURATION_SECONDS[duration], permanent: false };
+    throw new Error('Choose tiered, 1h, 6h, 1d, 7d, 30d, or permanent.');
+}
 
 // ── Slash command definitions ───────────────────────────────────────────────
 function buildNametagCommand(roleNames) {
@@ -65,7 +74,10 @@ function buildAccessCommand() {
         .addSubcommand(sc => sc.setName('ban').setDescription('Blacklist a Roblox account')
             .addIntegerOption(id)
             .addStringOption(o => o.setName('reason').setDescription('Why this account is being blocked').setRequired(true).setMaxLength(500))
-            .addBooleanOption(o => o.setName('permanent').setDescription('Make this blacklist permanent')))
+            .addStringOption(o => o.setName('duration').setDescription('Ban duration (default uses offense tiers)').addChoices(
+                { name: 'Tiered by offense', value: 'tiered' }, { name: '1 hour', value: '1h' }, { name: '6 hours', value: '6h' },
+                { name: '1 day', value: '1d' }, { name: '1 week', value: '7d' }, { name: '1 month', value: '30d' },
+                { name: 'Permanent', value: 'permanent' })))
         .addSubcommand(sc => sc.setName('unban').setDescription('Lift an account/HWID blacklist')
             .addStringOption(target))
         .addSubcommand(sc => sc.setName('allow').setDescription('Allowlist an account from automatic tamper enforcement')
@@ -228,7 +240,7 @@ function formatActiveUsers(users) {
 
 function buildPanelModal(action) {
     const definitions = {
-        ban: { title: 'Blacklist Roblox Account', fields: [['roblox_id', 'Roblox User ID', TextInputStyle.Short, true], ['reason', 'Reason', TextInputStyle.Paragraph, true]] },
+        ban: { title: 'Blacklist Roblox Account', fields: [['roblox_id', 'Roblox User ID', TextInputStyle.Short, true], ['reason', 'Reason', TextInputStyle.Paragraph, true], ['duration', 'Duration: tiered/1h/6h/1d/7d/30d/perm', TextInputStyle.Short, false]] },
         allow: { title: 'Allowlist Roblox Account', fields: [['roblox_id', 'Roblox User ID', TextInputStyle.Short, true], ['reason', 'Review note', TextInputStyle.Paragraph, false]] },
         unban: { title: 'Lift Account Blacklist', fields: [['target', 'Roblox User ID or HWID', TextInputStyle.Short, true]] },
         reason: { title: 'Edit Blacklist Reason', fields: [['target', 'Roblox User ID or HWID', TextInputStyle.Short, true], ['reason', 'Updated reason', TextInputStyle.Paragraph, true]] },
@@ -250,11 +262,17 @@ function buildPanelModal(action) {
 
 // ── Interaction handling (separate from the Discord connection so it can be tested) ──
 function createHandler(deps) {
-    const { staffIds, roleNames, setRole, clearRole, getRoles, tags, access, publicUrl } = deps;
+    const { staffIds, ownerDiscordIds = [], roleNames, setRole, clearRole, getRoles, tags, access, publicUrl } = deps;
     const say = deps.log || console.log;
     const lookup = deps.lookup || makeRobloxLookup();
+    const ownerIdSet = new Set(ownerDiscordIds);
+
+    function isOwner(interaction) {
+        return ownerIdSet.has(interaction.user.id);
+    }
 
     function isAllowed(interaction) {
+        if (isOwner(interaction)) return true;
         if (staffIds && staffIds.length) return staffIds.includes(interaction.user.id);
         return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
     }
@@ -326,7 +344,8 @@ function createHandler(deps) {
         if (action === 'ban') {
             const userId = value('roblox_id'), reason = value('reason');
             if (!/^\d{1,20}$/.test(userId)) throw new Error('Roblox user ID must be numeric.');
-            const result = access.blacklist({ userId, username: `Roblox ${userId}`, reason, actor });
+            const duration = banDurationOptions(value('duration'));
+            const result = access.blacklist({ userId, username: `Roblox ${userId}`, reason, actor, ownerAuthorized: isOwner(interaction), ...duration });
             return void (await interaction.reply({ content: `⛔ Blacklisted **${userId}** (${result.permanent ? 'permanent' : 'temporary'}). Reason: ${reason}`, flags: EPHEMERAL }));
         }
         if (action === 'allow') {
@@ -384,7 +403,8 @@ function createHandler(deps) {
         if (sub === 'ban') {
             const userId = interaction.options.getInteger('roblox_id', true);
             const reason = interaction.options.getString('reason', true);
-            const result = access.blacklist({ userId, username: `Roblox ${userId}`, reason, permanent: interaction.options.getBoolean('permanent') === true, actor });
+            const duration = banDurationOptions(interaction.options.getString('duration'), interaction.options.getBoolean('permanent') === true);
+            const result = access.blacklist({ userId, username: `Roblox ${userId}`, reason, actor, ownerAuthorized: isOwner(interaction), ...duration });
             return void (await interaction.reply({ content: `⛔ Blacklisted Roblox account **${userId}** (${result.permanent ? 'permanent' : 'temporary'}). Reason: ${reason}`, flags: EPHEMERAL }));
         }
         if (sub === 'unban') {

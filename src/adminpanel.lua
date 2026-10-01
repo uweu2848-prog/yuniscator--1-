@@ -8,9 +8,9 @@ function AdminPanel.Build(Window, ctx)
     local request = ctx.request
     local HttpService = game:GetService("HttpService")
     local panel = Window:CreatePopout({ Name = "ScorpAdminPanel", Title = "Scorp Staff Console", Size = UDim2.fromOffset(560, 700) })
-    local statusLabel, detailsLabel, playersLabel, accessListsLabel
+    local statusLabel, detailsLabel, playersLabel, accessListsLabel, supportReportsLabel
     local targetBox, usernameBox, reasonBox, roleTextBox, colorTextBox
-    local activePlayers, rolePicker, colorPicker, redSlider, greenSlider, blueSlider
+    local activePlayers, rolePicker, colorPicker, redSlider, greenSlider, blueSlider, banDurationPicker
     local activeByChoice = {}
 
     local function notify(message, isError)
@@ -116,6 +116,24 @@ function AdminPanel.Build(Window, ctx)
         playersLabel:Set(#choices == 0 and "No active Scorp users in this server right now." or ("" .. #choices .. " active account(s) · choose a player to load their ID below."))
     end
 
+    local function refreshSupportReports()
+        local data, err = call("/api/panel/support/reports")
+        if not data then
+            supportReportsLabel:Set("Support queue unavailable · " .. tostring(err))
+            return notify(tostring(err), true)
+        end
+        local rows = { "RECENT SUPPORT REPORTS" }
+        local reports = data.reports or {}
+        for i = 1, math.min(#reports, 8) do
+            local report = reports[i]
+            rows[#rows + 1] = "• " .. tostring(report.id) .. " · " .. tostring(report.category) .. " · target " .. tostring(report.targetUserId or "—")
+            rows[#rows + 1] = "  " .. tostring(report.subject):sub(1, 100)
+            rows[#rows + 1] = "  " .. tostring(report.details):sub(1, 220)
+        end
+        if #reports == 0 then rows[#rows + 1] = "• No reports filed" end
+        supportReportsLabel:Set(table.concat(rows, "\n"))
+    end
+
     local function lookupUsername()
         local username = usernameBox:Get():gsub("^@", "")
         if username == "" then return notify("Enter a Roblox username first.", true) end
@@ -189,13 +207,18 @@ function AdminPanel.Build(Window, ctx)
     do
         local sec = panel:CreateSection("04 · Account Actions", false)
         sec:AddLabel("Choose an active user above or resolve a Roblox username, then select an action.", { Wrap = true, Color = Window.Theme.TextDim })
-        sec:AddButton("Temporary Ban (tiered)", function()
+        banDurationPicker = sec:AddDropdown("Ban duration", { Options = { "Tiered by offense", "1 hour", "6 hours", "1 day", "1 week", "1 month", "Permanent" }, Default = "Tiered by offense" })
+        sec:AddButton("Apply Selected Ban Duration", function()
             local id, reason = targetId(), reasonBox:Get()
             if not id then return end
             if reason == "" then return notify("Add a brief reason for the ban.", true) end
-            local data, err = call("/api/panel/blacklist", { userId = id, username = usernameBox:Get(), reason = reason, permanent = false })
+            local duration = banDurationPicker:Get()
+            local seconds = { ["1 hour"] = 3600, ["6 hours"] = 21600, ["1 day"] = 86400, ["1 week"] = 604800, ["1 month"] = 2592000 }
+            local body = { userId = id, username = usernameBox:Get(), reason = reason, permanent = duration == "Permanent" }
+            if seconds[duration] then body.durationSeconds = seconds[duration] end
+            local data, err = call("/api/panel/blacklist", body)
             if not data then return notify(tostring(err), true) end
-            notify("Temporary blacklist recorded.")
+            notify("Blacklist recorded · " .. (duration == "Tiered by offense" and "offense tier" or duration))
             refreshOverview()
         end)
         sec:AddButton("Blacklist Permanently", function()
@@ -243,7 +266,14 @@ function AdminPanel.Build(Window, ctx)
     end
 
     do
-        local sec = panel:CreateSection("05 · Nametag Design", false)
+        local sec = panel:CreateSection("05 · Support Review", false)
+        sec:AddLabel("Review submitted reports here. Verify details before applying a blacklist or temporary ban.", { Wrap = true, Color = Window.Theme.TextDim })
+        supportReportsLabel = sec:AddLabel("Refresh to load recent support reports.", { Wrap = true, Color = Window.Theme.TextDim, TextSize = 11 })
+        sec:AddButton("Refresh Support Reports", refreshSupportReports)
+    end
+
+    do
+        local sec = panel:CreateSection("06 · Nametag Design", false)
         sec:AddLabel("Set the account role, displayed role text, and a custom accent color. The Roblox username remains visible.", { Wrap = true, Color = Window.Theme.TextDim })
         rolePicker = sec:AddDropdown("Role", { Options = { "owner", "developer", "admin", "moderator", "support", "vip", "member" }, Default = "member" })
         roleTextBox = sec:AddTextbox("Role Text", { Default = "", Placeholder = "text shown on the tag (max 24)" })
@@ -303,6 +333,7 @@ function AdminPanel.Build(Window, ctx)
         panel:Show()
         task.defer(refreshOverview)
         task.defer(refreshPlayers)
+        task.defer(refreshSupportReports)
     end
     function api.Destroy() pcall(function() panel:Hide() end) end
     return api

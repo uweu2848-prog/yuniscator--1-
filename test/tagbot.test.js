@@ -111,10 +111,10 @@ function testTagconfig() {
 }
 
 // ── discord-bot interaction handler ─────────────────────────────────────────
-function fakeInteraction({ command, sub, opts = {}, staffOk = true, focused, kind = 'chat', customId, fields = {} }) {
+function fakeInteraction({ command, sub, opts = {}, staffOk = true, focused, kind = 'chat', customId, fields = {}, userId = 'u1' }) {
     const replies = [];
     return {
-        user: { id: 'u1', username: 'staffer' },
+        user: { id: userId, username: 'staffer' },
         commandName: command,
         customId,
         memberPermissions: { has: () => staffOk },
@@ -201,7 +201,12 @@ function makeStore() {
             tier: (id, tier) => { tiers[String(id)] = tier; return info(id); },
         },
         access: {
-            blacklist: entry => { accessState.blacklisted.push(entry); accessState.events.push({ action: 'manual_blacklist', userId: String(entry.userId), reason: entry.reason }); return { permanent: !!entry.permanent }; },
+            blacklist: entry => {
+                if (['1000', '8001'].includes(String(entry.userId)) && !entry.ownerAuthorized) throw new Error('This account is protected staff.');
+                accessState.blacklisted.push(entry);
+                accessState.events.push({ action: 'manual_blacklist', userId: String(entry.userId), reason: entry.reason });
+                return { permanent: !!entry.permanent };
+            },
             unblacklist: target => { const i = accessState.blacklisted.findIndex(x => String(x.userId) === String(target)); if (i < 0) return false; accessState.blacklisted.splice(i, 1); accessState.events.push({ action: 'blacklist_remove', target }); return true; },
             allow: (userId, reason) => { accessState.allowlisted.push({ userId: String(userId), reason }); accessState.events.push({ action: 'allowlist_add', userId: String(userId), reason }); },
             unallow: userId => { const i = accessState.allowlisted.findIndex(x => x.userId === String(userId)); if (i < 0) return false; accessState.allowlisted.splice(i, 1); accessState.events.push({ action: 'allowlist_remove', userId: String(userId) }); return true; },
@@ -221,7 +226,7 @@ async function testBot() {
     ok(cmds.map(c => c.name).sort().join(',') === 'access,nametag,panel,tag,users', 'buildCommands registers /access, /nametag, /panel, /tag, and /users');
     const panelJson = buildPanelComponents().map(row => row.toJSON());
     ok(panelJson.length === 2 && panelJson.reduce((n, row) => n + row.components.length, 0) >= 8, 'staff dashboard has button rows for access and tag tasks');
-    ok(buildPanelModal('ban').toJSON().components.length === 2 && buildPanelModal('premium').toJSON().components.length === 3, 'dashboard actions open structured input modals');
+    ok(buildPanelModal('ban').toJSON().components.length === 3 && buildPanelModal('premium').toJSON().components.length === 3, 'dashboard actions open structured input modals');
 
     // permission gate
     const deps0 = makeStore();
@@ -254,6 +259,22 @@ async function testBot() {
     const banInter = fakeInteraction({ command: 'access', sub: 'ban', opts: { roblox_id: 42, reason: 'chargeback abuse', permanent: true } });
     await handle(banInter);
     ok(deps.access.snapshot().blacklisted.some(entry => String(entry.latestReason.userId) === '42' && entry.latestReason.reason === 'chargeback abuse'), '/access ban stores a staff reason');
+    const weekBanInter = fakeInteraction({ command: 'access', sub: 'ban', opts: { roblox_id: 43, reason: 'week-long cooldown', duration: '7d' } });
+    await handle(weekBanInter);
+    ok(deps.access.snapshot().blacklisted.some(entry => String(entry.latestReason.userId) === '43' && entry.latestReason.durationSeconds === 604800), 'Discord slash ban passes the selected one-week duration');
+    const protectedDeps = makeStore();
+    const protectedHandle = createHandler({ ...protectedDeps, ownerDiscordIds: ['owner-discord'] });
+    const staffBanProtected = fakeInteraction({ command: 'access', sub: 'ban', opts: { roblox_id: 1000, reason: 'attempted staff ban' } });
+    await protectedHandle(staffBanProtected);
+    ok(staffBanProtected._replies[0]?.payload?.content?.includes('protected staff') && !protectedDeps.access.snapshot().blacklisted.length, 'Discord staff cannot blacklist protected Roblox staff');
+    const ownerBanProtected = fakeInteraction({ command: 'access', sub: 'ban', opts: { roblox_id: 1000, reason: 'owner-approved ban' }, userId: 'owner-discord', staffOk: false });
+    await protectedHandle(ownerBanProtected);
+    ok(protectedDeps.access.snapshot().blacklisted.some(entry => String(entry.latestReason.userId) === '1000' && entry.latestReason.ownerAuthorized), 'configured Discord owner can blacklist protected staff');
+    const protectedModalDeps = makeStore();
+    const protectedModalHandle = createHandler({ ...protectedModalDeps, ownerDiscordIds: ['owner-discord'] });
+    const protectedModal = fakeInteraction({ kind: 'modal', customId: 'scorp:panel:submit:ban', fields: { roblox_id: '8001', reason: 'dashboard attempt' } });
+    await protectedModalHandle(protectedModal);
+    ok(protectedModal._replies[0]?.payload?.content?.includes('protected staff'), 'Discord dashboard also refuses a non-owner protected-staff ban');
     const editReasonInter = fakeInteraction({ command: 'access', sub: 'reason', opts: { target: '42', text: 'reviewed by staff' } });
     await handle(editReasonInter);
     ok(deps.access.snapshot().blacklisted.some(entry => String(entry.latestReason.userId) === '42' && entry.latestReason.reason === 'reviewed by staff'), '/access reason edits the latest blacklist reason');

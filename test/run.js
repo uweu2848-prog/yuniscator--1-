@@ -10,6 +10,7 @@
  * loader + built payload against the server inside a mocked Roblox (test/lua/).
  */
 const http = require('http');
+const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -32,7 +33,7 @@ const section = t => console.log(`\n${t}`);
 // ── fake Discord ────────────────────────────────────────────────────────────
 function startFakeDiscord() {
     const received = [];
-    const state = { rateLimitNext: 0, activeMessages: new Map(), activeEdits: [] };
+    const state = { rateLimitNext: 0, activeMessages: new Map(), activeEdits: [], webhookPayloads: [] };
     let nextMessageId = 0;
     const server = http.createServer((req, res) => {
         if (req.method === 'GET') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ name: 'fake-hook' })); }
@@ -47,7 +48,7 @@ function startFakeDiscord() {
                 return res.end(JSON.stringify({ retry_after: 0.2 }));
             }
             let payload;
-            try { payload = JSON.parse(body); received.push(payload.embeds[0]); } catch { /* ignore */ }
+            try { payload = JSON.parse(body); received.push(payload.embeds[0]); state.webhookPayloads.push(payload); } catch { /* ignore */ }
             if (req.method === 'POST' && url.searchParams.get('wait') === 'true') {
                 const id = `fake-message-${++nextMessageId}`;
                 state.activeMessages.set(id, payload.embeds[0]);
@@ -81,15 +82,28 @@ async function waitFor(fn, ms = 6000) {
 // ── server process ──────────────────────────────────────────────────────────
 async function startServer(discordPort, extraEnv = {}) {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scorp-test-'));
-    const port = 3200 + Math.floor(Math.random() * 500);
+    const port = await new Promise((resolve, reject) => {
+        const probe = net.createServer();
+        probe.once('error', reject);
+        probe.listen(0, '127.0.0.1', () => {
+            const freePort = probe.address().port;
+            probe.close(error => error ? reject(error) : resolve(freePort));
+        });
+    });
     const env = {
         ...process.env,
+        NODE_ENV: 'test',
         PORT: String(port),
         DATA_DIR: dataDir,
         DISCORD_WEBHOOK: `http://127.0.0.1:${discordPort}/api/webhooks/1/abc`,
+        DISCORD_TOKEN: '',
+        DISCORD_CLIENT_ID: '',
         OWNER_USER_ID: '1000',
         ADMIN_ROBLOX_IDS: '8001',
         TAG_MANAGER_ROBLOX_IDS: '8002',
+        SUPPORT_ROBLOX_IDS: '8005',
+        OWNER_DISCORD_IDS: '11111111111111111',
+        STAFF_DISCORD_IDS: '22222222222222222,33333333333333333',
         OWNER_KEY: 'owner-secret',
         ADMIN_PASSWORD: 'admin-secret',
         SESSION_SECRET: 'scorp-integration-session-secret',
@@ -104,11 +118,21 @@ async function startServer(discordPort, extraEnv = {}) {
     };
     const child = spawn(process.execPath, [path.join(ROOT, 'src', 'server.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
+    let exitSummary = null;
+    let healthError = null;
     child.stdout.on('data', d => (log += d));
     child.stderr.on('data', d => (log += d));
+    child.on('error', e => (log += `\nchild process error: ${e.message}`));
+    child.on('exit', (code, signal) => { exitSummary = `exit=${code}, signal=${signal}`; });
     const base = `http://127.0.0.1:${port}`;
-    const up = await waitFor(async () => { try { return (await fetch(`${base}/api/health`)).ok; } catch { return false; } }, 10000);
-    if (!up) { child.kill(); throw new Error('server did not start:\n' + log); }
+    const up = await waitFor(async () => {
+        try { return (await fetch(`${base}/api/health`)).ok; }
+        catch (e) { healthError = e.message; return false; }
+    }, 10000);
+    if (!up) {
+        if (child.exitCode === null && child.signalCode === null) child.kill();
+        throw new Error(`server did not start (${exitSummary || 'still running'}, health: ${healthError || 'no response'}):\n${log}`);
+    }
     return { child, base, port, dataDir, getLog: () => log, stop: () => child.kill() };
 }
 
@@ -273,6 +297,16 @@ async function testServer(d) {
 
         const manualBan = await post(base, '/api/admin/blacklist', { userId: '9001', username: 'ReviewMe', reason: 'manual review pending', permanent: true, actor: 'test staff' }, admin);
         ok(manualBan.status === 200 && manualBan.json.entry.permanent, 'staff can apply a permanent blacklist with a reason');
+        const weekBan = await post(base, '/api/admin/blacklist', { userId: '9006', reason: 'week-long moderation action', durationSeconds: 7 * 24 * 60 * 60 }, admin);
+        ok(weekBan.status === 200 && !weekBan.json.entry.permanent && weekBan.json.entry.latestReason.durationSeconds === 7 * 24 * 60 * 60, 'staff can apply and audit a custom one-week ban');
+        await post(base, '/api/admin/unblacklist', { target: '9006' }, admin);
+        const invalidDurationBan = await post(base, '/api/admin/blacklist', { userId: '9007', reason: 'bad duration', durationSeconds: 0 }, admin);
+        ok(invalidDurationBan.status === 400 && /duration/i.test(invalidDurationBan.json.error), 'invalid custom ban durations are rejected');
+        const protectedApiBan = await post(base, '/api/admin/blacklist', { userId: '8001', reason: 'should require owner approval' }, admin);
+        ok(protectedApiBan.status === 400 && /protected staff/i.test(protectedApiBan.json.error), 'admin API cannot blacklist a configured panel admin without owner authorization');
+        const ownerApiBan = await post(base, '/api/admin/blacklist', { userId: '8001', reason: 'owner-approved review' }, { ...admin, 'x-owner-key': 'owner-secret' });
+        ok(ownerApiBan.status === 200 && ownerApiBan.json.entry.latestReason.ownerAuthorized === true, 'owner key authorizes and audits a protected-staff blacklist through the admin API');
+        await post(base, '/api/admin/unblacklist', { target: '8001' }, admin);
         const editedReason = await fetch(`${base}/api/admin/blacklist/reason`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ target: '9001', reason: 'confirmed abuse', actor: 'test staff' }) });
         const editedReasonData = await editedReason.json();
         ok(editedReason.status === 200 && editedReasonData.reason === 'confirmed abuse', 'staff can edit the latest automatic/manual blacklist reason');
@@ -295,12 +329,13 @@ async function testServer(d) {
         ok(sp.json.token === null, 'claiming the owner userId WITHOUT the key gets no immunity (banned like anyone)');
         await post(base, '/api/admin/unblacklist', { target: '1000' }, admin);
         await sleep(1300);
-        const before = d.received.length;
+        const ownerAlertCount = () => d.received.filter(embed => embed.fields?.some(field => field.name === 'Account' && field.value.includes('#1000'))).length;
+        const before = ownerAlertCount();
         const own = await post(base, '/api/session', { ...spoof, hwid: 'BOSS-HW-2', ownerKey: 'owner-secret', flags: ['C1', 'H2', 'G1'] });
         ok(own.status === 200 && own.json.token, 'owner with the key connects even with flags set');
         ok((await post(base, '/api/heartbeat', { flags: ['C1', 'H2', 'G1'] }, bearer(own.json.token))).status === 200, 'owner heartbeat with flags is never banned');
         await sleep(400);
-        ok(d.received.length === before, 'and produces no alert');
+        ok(ownerAlertCount() === before, 'verified owner tamper flags produce no account alert');
         const wrongKey = await post(base, '/api/session', { userId: '1001', username: 'Nope', hwid: 'H-nope', ownerKey: 'wrong', flags: ['C1', 'H2'] });
         ok(wrongKey.json.token === null, 'wrong owner key = no exemption');
 
@@ -316,6 +351,34 @@ async function testServer(d) {
         ok(d.received.filter(e => /Session did not check in/.test(e.title)).length === countBefore, 'a session that did check in is not reported');
 
         section('Nametag roster + roles');
+        const supportUser = { userId: '8005', username: 'Helper', hwid: 'SUPPORT-HW' };
+        const supportSession = await post(base, '/api/session', supportUser);
+        const supportAuth = await (await fetch(`${base}/api/panel/authorize`, { headers: bearer(supportSession.json.token) })).json();
+        ok(supportAuth.support === true && supportAuth.authorized === false && supportAuth.tagManager === false, 'support accounts receive support-only panel authorization');
+        ok((await fetch(`${base}/api/panel/module`, { headers: bearer(supportSession.json.token) })).status === 403 && (await post(base, '/api/panel/blacklist', { userId: '9005', reason: 'not allowed' }, bearer(supportSession.json.token))).status === 403, 'support accounts cannot fetch or use moderation admin routes');
+        const supportModule = await fetch(`${base}/api/support-panel/module`, { headers: bearer(supportSession.json.token) });
+        const supportModuleCode = await supportModule.text();
+        let supportModuleParses = true;
+        try { luaparse.parse(supportModuleCode, { luaVersion: '5.1' }); } catch { supportModuleParses = false; }
+        ok(supportModule.status === 200 && supportModuleParses && supportModuleCode.includes('Submit Report') && !supportModuleCode.includes('Blacklist'), 'support users receive a valid, isolated reporting panel');
+        ok((await fetch(`${base}/api/support-panel/module`, { headers: bearer(s1.json.token) })).status === 403, 'ordinary users cannot fetch the support panel module');
+        const reportDetails = 'The user repeatedly targeted other Scorp users after staff asked them to stop. '.repeat(24).slice(0, 1700).trim();
+        ok((await post(base, '/api/support-panel/report', { category: 'harassment', subject: 'Repeated harassment', details: reportDetails, targetUserId: '9005' }, bearer(supportSession.json.token))).status === 200, 'support staff can submit a validated report');
+        ok(await waitFor(() => d.state.webhookPayloads.some(payload => payload.embeds?.[0]?.title?.includes('Support report'))), 'support report is delivered to the Discord webhook');
+        const supportPing = d.state.webhookPayloads.find(payload => payload.embeds?.[0]?.title?.includes('Support report'));
+        ok(supportPing.content.includes('<@11111111111111111>') && supportPing.content.includes('<@22222222222222222>') && supportPing.allowed_mentions.users.length === 3, 'support report pings only the configured owner/admin Discord accounts');
+        const sentReportDetails = supportPing.embeds[0].fields.filter(field => field.name.startsWith('Report details')).map(field => field.value).join('');
+        ok(sentReportDetails === reportDetails, 'long support report details are fully preserved in Discord');
+        const targetForPause = await post(base, '/api/session', { userId: '9005', username: 'Troll', hwid: 'TROLL-HW' });
+        await post(base, '/api/heartbeat', { flags: [] }, bearer(targetForPause.json.token));
+        const pause = await post(base, '/api/support-panel/end-session', { userId: '9005', durationMinutes: 15, reason: 'Repeated targeted harassment' }, bearer(supportSession.json.token));
+        ok(pause.status === 200 && pause.json.until, 'support can temporarily end a non-staff Scorp session');
+        const pausedHeartbeat = await post(base, '/api/heartbeat', { flags: [] }, bearer(targetForPause.json.token));
+        ok(pausedHeartbeat.status === 403 && pausedHeartbeat.json.revoked && /paused by support/.test(pausedHeartbeat.json.message), 'support session ending revokes the live client with a readable notice');
+        const pausedReload = await post(base, '/api/session', { userId: '9005', username: 'Troll', hwid: 'TROLL-HW-2' });
+        ok(pausedReload.status === 200 && pausedReload.json.token === null, 'support pause also blocks new script loads until it expires');
+        ok((await post(base, '/api/support-panel/end-session', { userId: '8001', durationMinutes: 15, reason: 'target staff' }, bearer(supportSession.json.token))).status === 403, 'support cannot end a configured staff session');
+        ok((await post(base, '/api/support-panel/report', { category: 'other', subject: 'Unauthorized report', details: 'This ordinary user must not file support reports.' }, bearer(s1.json.token))).status === 403, 'ordinary users cannot submit support reports');
         const A = newUser({ userId: '8001', username: 'Alice' }), B = newUser({ userId: '8002', username: 'Bob' }), C = newUser({ userId: '8003', username: 'Carol' });
         const tok = {};
         for (const [k, u] of Object.entries({ A, B, C })) {
@@ -327,6 +390,8 @@ async function testServer(d) {
         const panelOverviewRes = await fetch(`${base}/api/panel/overview`, { headers: bearer(tok.A) });
         const panelOverview = await panelOverviewRes.json();
         ok(panelOverviewRes.status === 200 && panelOverview.access && panelOverview.history, 'configured Roblox staff can load the in-game admin panel overview');
+        const supportQueue = await (await fetch(`${base}/api/panel/support/reports`, { headers: bearer(tok.A) })).json();
+        ok(supportQueue.reports.some(report => report.targetUserId === '9005' && report.category === 'harassment'), 'full admins can review filed support reports in the panel');
         ok((await fetch(`${base}/api/panel/overview`, { headers: bearer(tok.B) })).status === 403, 'non-staff Roblox sessions cannot access the in-game admin panel');
         ok((await post(base, '/api/panel/resolve-user', { username: 'bad name' }, bearer(tok.A))).status === 400, 'username lookup validates Roblox username syntax before calling Roblox');
         ok((await post(base, '/api/panel/resolve-user', { username: 'RobloxName' }, bearer(tok.C))).status === 403, 'username lookup is restricted to configured tag staff');
@@ -349,6 +414,16 @@ async function testServer(d) {
         const panelBan = await post(base, '/api/panel/blacklist', { userId: '9002', reason: 'panel moderation test', permanent: true }, bearer(tok.A));
         ok(panelBan.status === 200 && panelBan.json.entry.latestReason.reason === 'panel moderation test', 'authorized in-game panel can blacklist with an audited reason');
         await post(base, '/api/panel/unblacklist', { target: '9002' }, bearer(tok.A));
+        const panelProtectsOwner = await post(base, '/api/panel/blacklist', { userId: '1000', reason: 'must be owner-only' }, bearer(tok.A));
+        ok(panelProtectsOwner.status === 400 && /protected staff/i.test(panelProtectsOwner.json.error), 'regular in-game admin cannot blacklist the configured owner');
+        const ownerSession = await post(base, '/api/session', { userId: '1000', username: 'Boss', hwid: 'BOSS-HW-OWNER', ownerKey: 'owner-secret' });
+        const ownerPanelBan = await post(base, '/api/panel/blacklist', { userId: '8001', reason: 'owner-approved staff action' }, bearer(ownerSession.json.token));
+        ok(ownerPanelBan.status === 200, 'owner-key-authenticated owner can blacklist a protected admin from the panel');
+        await post(base, '/api/panel/unblacklist', { target: '8001' }, bearer(ownerSession.json.token));
+        const linkedStaffHwidBan = await post(base, '/api/admin/blacklist', { hwid: A.hwid, reason: 'attempt via linked device' }, admin);
+        ok(linkedStaffHwidBan.status === 400 && /protected staff/i.test(linkedStaffHwidBan.json.error), 'regular admin cannot evade protection by targeting a linked staff HWID');
+        ok((await post(base, '/api/heartbeat', { flags: ['C1', 'H2'] }, bearer(tok.A))).status === 200, 'configured staff anti-tamper flags are reported without automatic blacklisting');
+        ok((await post(base, '/api/heartbeat', { flags: ['C1', 'H2'] }, bearer(tok.B))).status === 200, 'configured tag managers also receive review-only anti-tamper handling');
         ok((await post(base, '/api/nametags/sync', { jobId: 'J1' })).status === 401, 'sync needs a token');
         ok((await fetch(`${base}/api/admin/roles/8002`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"role":"support"}' })).status === 403, 'setting a role needs the admin key');
         const put = await fetch(`${base}/api/admin/roles/8002`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ role: 'support', label: 'Scorp Trial Support' }) });
@@ -495,9 +570,10 @@ async function testServer(d) {
 
         section('Discord rate limiting');
         d.state.rateLimitNext = 1;
-        const cnt = d.received.length;
+        const testWebhookCount = () => d.received.filter(embed => embed.title === '🔔 Webhook test').length;
+        const countBeforeRetry = testWebhookCount();
         const t2 = await post(base, '/api/admin/test-webhook', {}, admin);
-        ok(t2.json.ok && d.received.length === cnt + 1, 'a 429 from Discord is retried and delivered');
+        ok(t2.json.ok && testWebhookCount() === countBeforeRetry + 1, 'a 429 from Discord is retried and delivered');
         const hh = await (await fetch(`${base}/api/health`)).json();
         ok(hh.webhook.sent > 3 && hh.webhook.failed === 0, 'health counts sent/failed webhook messages', hh.webhook);
 

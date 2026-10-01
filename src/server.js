@@ -24,6 +24,7 @@ const ROOT = path.join(__dirname, '..');
 // .env support (tiny, no dependency). Real environment variables always win.
 // ────────────────────────────────────────────────────────────────────────────
 (function loadDotEnv() {
+    if (process.env.NODE_ENV === 'test') return;
     const file = path.join(ROOT, '.env');
     if (!fs.existsSync(file)) return;
     for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
@@ -55,6 +56,8 @@ const CONFIG = {
     OWNER_USER_ID: String(env.OWNER_USER_ID || '').trim(),
     ADMIN_ROBLOX_IDS: (env.ADMIN_ROBLOX_IDS || '').split(',').map(s => s.trim()).filter(s => /^\d{1,20}$/.test(s)),
     TAG_MANAGER_ROBLOX_IDS: (env.TAG_MANAGER_ROBLOX_IDS || '').split(',').map(s => s.trim()).filter(s => /^\d{1,20}$/.test(s)),
+    SUPPORT_ROBLOX_IDS: (env.SUPPORT_ROBLOX_IDS || '').split(',').map(s => s.trim()).filter(s => /^\d{1,20}$/.test(s)),
+    OWNER_DISCORD_IDS: (env.OWNER_DISCORD_IDS || '').split(',').map(s => s.trim()).filter(s => /^\d{1,20}$/.test(s)),
     OWNER_KEY: env.OWNER_KEY || '',
     ADMIN_PASSWORD: env.ADMIN_PASSWORD || '',
     DISCORD_TOKEN: (env.DISCORD_TOKEN || '').trim(),
@@ -110,12 +113,15 @@ const TAGS_FILE = path.join(CONFIG.DATA_DIR, 'tags.json');
 const PAID_TAGS_FILE = path.join(CONFIG.DATA_DIR, 'paid-tags.json');
 const ACCESS_FILE = path.join(CONFIG.DATA_DIR, 'access.json');
 const ACCESS_HISTORY_FILE = path.join(CONFIG.DATA_DIR, 'access-history.json');
+const SUPPORT_REPORTS_FILE = path.join(CONFIG.DATA_DIR, 'support-reports.json');
+const SUPPORT_RESTRICTIONS_FILE = path.join(CONFIG.DATA_DIR, 'support-restrictions.json');
 const KNOWN_USERS_FILE = path.join(CONFIG.DATA_DIR, 'known-users.json');
 const ACTIVE_WEBHOOK_FILE = path.join(CONFIG.DATA_DIR, 'active-users-webhook.json');
 const SECRET_FILE = path.join(CONFIG.DATA_DIR, 'session.key');
 const LIB_FILE = path.join(ROOT, 'src', 'ScorpLib.lua');
 const ADMIN_PANEL_FILE = path.join(ROOT, 'src', 'adminpanel.lua');
 const TAG_PANEL_FILE = path.join(ROOT, 'src', 'tagpanel.lua');
+const SUPPORT_PANEL_FILE = path.join(ROOT, 'src', 'supportpanel.lua');
 const LOADER_FILE = path.join(ROOT, 'loader.lua');
 
 // Secrets that were not provided
@@ -191,6 +197,7 @@ function verifyToken(token) {
 const ownerKeyOk = k => !!CONFIG.OWNER_KEY && typeof k === 'string' && k.length > 0 && safeEqual(k, CONFIG.OWNER_KEY);
 const panelAdminIds = new Set([CONFIG.OWNER_USER_ID, ...CONFIG.ADMIN_ROBLOX_IDS].filter(isDigits));
 const tagManagerIds = new Set(CONFIG.TAG_MANAGER_ROBLOX_IDS);
+const supportIds = new Set(CONFIG.SUPPORT_ROBLOX_IDS);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Discord webhook — queued, rate-limit aware, and it tells you when it fails
@@ -258,6 +265,11 @@ async function drainWebhooks() {
 
 function alert(embedSpec) {
     const body = makeEmbed(embedSpec);
+    const mentionIds = [...new Set((embedSpec.mentionIds || []).map(String).filter(id => /^\d{1,20}$/.test(id)))].slice(0, 50);
+    if (mentionIds.length) {
+        body.content = mentionIds.map(id => `<@${id}>`).join(' ');
+        body.allowed_mentions = { parse: [], users: mentionIds };
+    }
     log(`[alert] ${embedSpec.title}${embedSpec.fields ? ' | ' + embedSpec.fields.map(f => `${f.name}=${f.value}`).join(' ') : ''}`);
     if (!CONFIG.DISCORD_WEBHOOK) return;
     if (webhookQueue.length > 50) webhookQueue.shift(); // never let a flood grow memory
@@ -422,6 +434,15 @@ const saveAccess = () => writeJsonAtomic(ACCESS_FILE, access);
 
 let accessHistory = readJson(ACCESS_HISTORY_FILE, []);
 if (!Array.isArray(accessHistory)) accessHistory = [];
+let supportReports = readJson(SUPPORT_REPORTS_FILE, []);
+if (!Array.isArray(supportReports)) supportReports = [];
+let supportRestrictions = readJson(SUPPORT_RESTRICTIONS_FILE, {});
+if (!supportRestrictions || typeof supportRestrictions !== 'object' || Array.isArray(supportRestrictions)) supportRestrictions = {};
+for (const [userId, restriction] of Object.entries(supportRestrictions)) {
+    if (!isDigits(userId) || !restriction || typeof restriction !== 'object' || !Number.isFinite(Number(restriction.until))) delete supportRestrictions[userId];
+}
+const saveSupportReports = () => writeJsonAtomic(SUPPORT_REPORTS_FILE, supportReports);
+const saveSupportRestrictions = () => writeJsonAtomic(SUPPORT_RESTRICTIONS_FILE, supportRestrictions);
 function recordAccessEvent(action, details = {}) {
     accessHistory.push({ action, at: new Date().toISOString(), ...details });
     if (accessHistory.length > 2000) accessHistory = accessHistory.slice(-2000);
@@ -482,6 +503,39 @@ function linkIdentity(userId, hwid) {
     for (let i = 1; i < ids.length; i++) root = union(root, ids[i]);
     return root;
 }
+const protectedStaffRobloxIds = new Set([
+    CONFIG.OWNER_USER_ID,
+    ...CONFIG.ADMIN_ROBLOX_IDS,
+    ...CONFIG.TAG_MANAGER_ROBLOX_IDS,
+].filter(isDigits));
+const autoBanProtectedRobloxIds = new Set([
+    ...CONFIG.ADMIN_ROBLOX_IDS,
+    ...CONFIG.TAG_MANAGER_ROBLOX_IDS,
+].filter(isDigits));
+
+function isProtectedStaffIdentity(userId, hwid, protectedIds = protectedStaffRobloxIds) {
+    if (userId && protectedIds.has(String(userId))) return true;
+    const candidates = [];
+    if (userId && isDigits(String(userId))) candidates.push(`uid:${userId}`);
+    if (hwid && hwid !== 'UNKNOWN_HWID') candidates.push(`hwid:${hwid}`);
+    for (const id of candidates) {
+        if (!(id in parent)) continue;
+        const root = find(id);
+        for (const linkedId of Object.keys(parent)) {
+            if (linkedId.startsWith('uid:')
+                && protectedIds.has(linkedId.slice(4))
+                && find(linkedId) === root) return true;
+        }
+    }
+    return false;
+}
+
+function activeSupportRestriction(userId) {
+    const restriction = supportRestrictions[String(userId)];
+    if (!restriction || !Number.isFinite(Number(restriction.until)) || Number(restriction.until) <= now()) return null;
+    return restriction;
+}
+
 function isGroupBanned(root) {
     const g = root && groups[root];
     if (!g) return false;
@@ -826,6 +880,7 @@ function applyBan(root, who, reason, codes, source) {
 /** Returns true if the identity is banned after processing. */
 function handleFlags(who, rawCodes, source) {
     const codes = sanitizeCodes(rawCodes);
+    const protectedStaff = !who.ownerOk && isProtectedStaffIdentity(who.userId, who.hwid, autoBanProtectedRobloxIds);
     const root = who.ownerOk ? null : linkIdentity(who.userId, who.hwid);
     if (!codes.length) return isGroupBanned(root);
 
@@ -834,6 +889,21 @@ function handleFlags(who, rawCodes, source) {
     if (who.ownerOk) {
         log(`[tamper] owner-verified session flagged ${codes.join(',')} (ignored)`);
         return false;
+    }
+
+    if (protectedStaff) {
+        if (!throttled(`protected-staff:${who.userId}:${codes.join(',')}`, 10 * 60 * 1000)) {
+            alert({
+                title: '🛡️ Activity flagged · protected staff account',
+                color: 0x3498db,
+                description: 'No automatic blacklist was applied. An owner must review any action against configured staff.',
+                fields: [
+                    ...alertIdentityFields(who),
+                    { name: 'Checks', value: codes.map(c => `${c}: ${CODE_INFO[c] ? CODE_INFO[c][1] : 'unrecognized check'}`).join('\n') },
+                ],
+            });
+        }
+        return isGroupBanned(root);
     }
 
     if (allowlistHas(who.userId)) {
@@ -911,6 +981,15 @@ setInterval(() => {
     if (expiredPresence) scheduleActiveUsersWebhook();
     for (const [k, ts] of alertSeen) if (t - ts > 60 * 60 * 1000) alertSeen.delete(k);
     for (const [k, ts] of lastIssue) if (t - ts > 60 * 1000) lastIssue.delete(k);
+    let restrictionsChanged = false;
+    for (const [userId, restriction] of Object.entries(supportRestrictions)) {
+        if (!restriction || Number(restriction.until) <= t) {
+            delete supportRestrictions[userId];
+            restrictionsChanged = true;
+        }
+    }
+    if (restrictionsChanged) saveSupportRestrictions();
+    for (const [userId, submittedAt] of supportReportLastSubmitted) if (t - submittedAt > 60 * 1000) supportReportLastSubmitted.delete(userId);
 }, CONFIG.WATCHER_INTERVAL_MS).unref();
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -962,6 +1041,12 @@ function requireToken(req, res, next) {
     const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
     const claims = m && verifyToken(m[1]);
     if (!claims) return res.status(401).json({ ok: false, error: 'bad token' });
+    const restriction = !claims.ok && activeSupportRestriction(claims.u);
+    if (restriction) return res.status(403).json({
+        ok: false,
+        revoked: true,
+        message: `Scorp access was paused by support until ${new Date(restriction.until).toISOString()}.`,
+    });
     const currentBuild = ensureBuilt();
     if (!currentBuild) return res.status(503).json({ ok: false, error: 'payload unavailable' });
     const channelMismatch = claims.c !== CONFIG.RELEASE_CHANNEL;
@@ -1017,9 +1102,106 @@ function requireTagManager(req, res, next) {
     next();
 }
 
+function requireSupport(req, res, next) {
+    if (!req.claims || !supportIds.has(String(req.claims.u))) {
+        return res.status(403).json({ ok: false, error: 'This Roblox account is not authorized for the Scorp support panel.' });
+    }
+    next();
+}
+
 app.get('/api/panel/authorize', requireToken, (req, res) => {
     const admin = panelAdminIds.has(String(req.claims.u));
-    res.json({ ok: true, authorized: admin, tagManager: isTagManager(req.claims.u) });
+    res.json({ ok: true, authorized: admin, tagManager: isTagManager(req.claims.u), support: supportIds.has(String(req.claims.u)) });
+});
+
+app.get('/api/support-panel/module', requireToken, requireSupport, (_req, res) => {
+    try {
+        res.type('text/plain').set('Cache-Control', 'no-store').send(fs.readFileSync(SUPPORT_PANEL_FILE, 'utf8'));
+    } catch (e) {
+        console.error('[support-panel] could not load authorized module:', e.message);
+        res.status(503).json({ ok: false, error: 'Support panel module is temporarily unavailable.' });
+    }
+});
+
+const supportReportLastSubmitted = new Map();
+const SUPPORT_REPORT_CATEGORIES = new Set(['behavior', 'harassment', 'cheating', 'exploiting', 'other']);
+app.post('/api/support-panel/report', requireToken, requireSupport, (req, res) => {
+    const actorId = String(req.claims.u);
+    const lastSubmitted = supportReportLastSubmitted.get(actorId) || 0;
+    if (now() - lastSubmitted < 30_000) return res.status(429).json({ ok: false, error: 'Please wait 30 seconds before submitting another report.' });
+    const body = req.body || {};
+    const category = cleanStr(body.category, 24).toLowerCase();
+    const subject = cleanStr(body.subject, 100);
+    const details = cleanStr(body.details, 1800);
+    const targetUserId = body.targetUserId == null || String(body.targetUserId).trim() === '' ? null : String(body.targetUserId).trim();
+    if (!SUPPORT_REPORT_CATEGORIES.has(category)) return res.status(400).json({ ok: false, error: 'Choose a valid report category.' });
+    if (subject.length < 4 || details.length < 20) return res.status(400).json({ ok: false, error: 'Add a short subject and at least 20 characters of report details.' });
+    if (targetUserId && !isDigits(targetUserId)) return res.status(400).json({ ok: false, error: 'Target Roblox ID must be numeric.' });
+
+    supportReportLastSubmitted.set(actorId, now());
+    const report = {
+        id: `SR-${crypto.randomBytes(5).toString('hex').toUpperCase()}`,
+        category,
+        subject,
+        details,
+        targetUserId,
+        reporterUserId: actorId,
+        reporterUsername: cleanStr(req.claims.nm, 40) || 'Unknown',
+        createdAt: new Date().toISOString(),
+        status: 'open',
+    };
+    supportReports.push(report);
+    if (supportReports.length > 1000) supportReports = supportReports.slice(-1000);
+    saveSupportReports();
+    recordAccessEvent('support_report', { reportId: report.id, userId: actorId, targetUserId, category, subject });
+    const reportDetailFields = [];
+    for (let offset = 0, part = 1; offset < details.length; offset += 950, part++) {
+        reportDetailFields.push({ name: reportDetailFields.length ? `Report details (${part})` : 'Report details', value: details.slice(offset, offset + 950) });
+    }
+    alert({
+        title: `📨 Support report · ${report.id}`,
+        color: 0x3498db,
+        description: 'A Scorp support member filed a report for staff review. Review it before taking moderation action.',
+        mentionIds: [...CONFIG.OWNER_DISCORD_IDS, ...CONFIG.STAFF_DISCORD_IDS],
+        fields: [
+            { name: 'Category', value: category, inline: true },
+            { name: 'Target Roblox ID', value: targetUserId || 'Not specified', inline: true },
+            { name: 'Submitted by', value: `${report.reporterUsername} (#${actorId})`, inline: true },
+            { name: 'Subject', value: subject },
+            ...reportDetailFields,
+        ],
+    });
+    res.json({ ok: true, report: { id: report.id, status: report.status, createdAt: report.createdAt } });
+});
+
+app.post('/api/support-panel/end-session', requireToken, requireSupport, (req, res) => {
+    const body = req.body || {};
+    const userId = String(body.userId || '').trim();
+    const durationMinutes = Number(body.durationMinutes);
+    const reason = cleanStr(body.reason, 300);
+    if (!isDigits(userId)) return res.status(400).json({ ok: false, error: 'Target Roblox ID must be numeric.' });
+    if (![5, 15, 60, 1440].includes(durationMinutes)) return res.status(400).json({ ok: false, error: 'Choose a 5-minute, 15-minute, 1-hour, or 24-hour session pause.' });
+    if (reason.length < 8) return res.status(400).json({ ok: false, error: 'Enter a short reason (at least 8 characters).' });
+    if (isProtectedStaffIdentity(userId, null)) return res.status(403).json({ ok: false, error: 'Support cannot end a configured staff member’s session.' });
+    const active = presence.has(userId) || [...issued.values()].some(session => session.userId === userId && now() - session.issuedAt <= 10 * 60 * 1000);
+    if (!active) return res.status(404).json({ ok: false, error: 'No active Scorp session was found for that account.' });
+
+    const until = now() + durationMinutes * 60 * 1000;
+    supportRestrictions[userId] = {
+        until,
+        reason,
+        actor: String(req.claims.u),
+        createdAt: new Date().toISOString(),
+    };
+    saveSupportRestrictions();
+    presence.delete(userId);
+    scheduleActiveUsersWebhook();
+    recordAccessEvent('support_session_ended', { userId, actor: String(req.claims.u), reason, durationMinutes, until });
+    res.json({ ok: true, userId, until: new Date(until).toISOString(), message: 'Scorp was stopped for this account and cannot be loaded again until the pause expires.' });
+});
+
+app.get('/api/panel/support/reports', requireToken, requirePanelAdmin, (_req, res) => {
+    res.json({ ok: true, reports: supportReports.slice(-50).reverse() });
 });
 
 const panelLookupLimiter = new Map();
@@ -1170,6 +1352,7 @@ app.post('/api/session', sessionLimiter, (req, res) => {
     // Banned people get a harmless stall instead of an error, so they can't tell what happened.
     const decoy = () => res.json({ ok: true, token: null, payload: 'print("Connecting to server..."); task.wait(9e9)', lib: '', hb: 60 });
 
+    if (!ownerOk && activeSupportRestriction(userId)) return decoy();
     if (!ownerOk && isGroupBanned(linkIdentity(userId, hwid))) return decoy();
 
     if (!b.resume) {
@@ -1612,18 +1795,30 @@ app.get('/api/admin/suspicious', (_req, res) => {
     res.json({ total: flagged.length, flagged });
 });
 
-function blacklistIdentity({ userId, hwid, username, reason, permanent, actor = 'admin' }) {
+function blacklistIdentity({ userId, hwid, username, reason, permanent, durationSeconds, actor = 'admin', ownerAuthorized = false }) {
     userId = userId == null ? '' : String(userId);
     hwid = cleanStr(hwid, 200);
     if ((!userId || !isDigits(userId)) && !hwid) throw new Error('Provide a numeric userId and/or HWID. IP-only blacklisting is disabled.');
+    if (!ownerAuthorized && isProtectedStaffIdentity(userId, hwid)) {
+        throw new Error('This account is protected staff. Only an owner-authorized action can blacklist configured staff.');
+    }
+    let customDurationMs = null;
+    if (durationSeconds !== undefined && durationSeconds !== null && durationSeconds !== '') {
+        const seconds = Number(durationSeconds);
+        if (!Number.isSafeInteger(seconds) || seconds < 60 || seconds > 365 * 24 * 60 * 60) {
+            throw new Error('Custom ban duration must be a whole number of seconds between 60 and 31536000.');
+        }
+        if (permanent === true) throw new Error('Choose either a custom duration or a permanent blacklist, not both.');
+        customDurationMs = seconds * 1000;
+    }
     const root = linkIdentity(userId && isDigits(userId) ? userId : null, hwid || null);
     if (!root) throw new Error('Could not resolve a blacklist identity.');
     const g = groups[root] || { offenseCount: 0, bannedUntil: null, permanent: false, reasons: [] };
     g.offenseCount += 1;
     const forever = permanent === true;
     const tier = BAN_TIERS[Math.min(g.offenseCount - 1, BAN_TIERS.length - 1)];
-    g.permanent = forever || tier === null;
-    g.bannedUntil = g.permanent ? null : now() + tier;
+    g.permanent = forever || (customDurationMs === null && tier === null);
+    g.bannedUntil = g.permanent ? null : now() + (customDurationMs === null ? tier : customDurationMs);
     const cleanReason = cleanStr(reason, 500) || 'Manual staff blacklist';
     const entry = {
         username: cleanStr(username, 80) || 'Manual Entry',
@@ -1633,6 +1828,8 @@ function blacklistIdentity({ userId, hwid, username, reason, permanent, actor = 
         reason: cleanReason,
         source: 'manual',
         actor: cleanStr(actor, 80) || 'admin',
+        ownerAuthorized: !!ownerAuthorized,
+        durationSeconds: g.permanent ? null : (customDurationMs === null ? tier / 1000 : customDurationMs / 1000),
         date: new Date().toISOString(),
     };
     g.reasons.push(entry);
@@ -1689,7 +1886,7 @@ function moderationSnapshot() {
 }
 
 app.post('/api/admin/blacklist', (req, res) => {
-    try { res.json({ success: true, entry: blacklistIdentity(req.body || {}) }); }
+    try { res.json({ success: true, entry: blacklistIdentity({ ...(req.body || {}), ownerAuthorized: ownerKeyOk(req.get('x-owner-key')) }) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1756,7 +1953,10 @@ app.get('/api/panel/overview', requireToken, requirePanelAdmin, (_req, res) => {
 });
 
 app.post('/api/panel/blacklist', requireToken, requirePanelAdmin, (req, res) => {
-    try { res.json({ ok: true, entry: blacklistIdentity({ ...(req.body || {}), actor: req.who.userId }) }); }
+    try {
+        const ownerAuthorized = String(req.claims.u) === CONFIG.OWNER_USER_ID && !!req.claims.ok;
+        res.json({ ok: true, entry: blacklistIdentity({ ...(req.body || {}), actor: req.who.userId, ownerAuthorized }) });
+    }
     catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 app.post('/api/panel/unblacklist', requireToken, requirePanelAdmin, (req, res) => {
@@ -1943,6 +2143,7 @@ function startDiscordBotIfConfigured() {
             clientId: CONFIG.DISCORD_CLIENT_ID,
             guildId: CONFIG.DISCORD_GUILD_ID,
             staffIds: CONFIG.STAFF_DISCORD_IDS,
+            ownerDiscordIds: CONFIG.OWNER_DISCORD_IDS,
             roleNames: ROLES,
             setRole,
             clearRole,
