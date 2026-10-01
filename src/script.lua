@@ -43,24 +43,24 @@ local Scorp = libFn()
 assert(Scorp, "[Scorp] UI library ran but returned nothing.")
 ctx.lib = nil -- don't keep the library source sitting in the shared table
 
-local function stub(name)
-    return function(value)
-        print(("[Scorp] %s -> %s"):format(name, tostring(value)))
-    end
-end
-
 -- ───────────────────────────────────────────────────────────────────────────
 --  Window
 -- ───────────────────────────────────────────────────────────────────────────
 local Window = Scorp:CreateWindow({
-    Title        = "Scorp",
-    Subtitle     = "A Out Of Space Experience  ·  v0.1",
-    Theme        = "Sharp Silver",
+    Title        = "SCORP",
+    Subtitle     = "Community · Identity · Experience",
+    Theme        = "Cosmic Void",
+    Size         = UDim2.fromOffset(940, 610),
+    MinSize      = Vector2.new(760, 500),
+    MaxSize      = Vector2.new(1240, 820),
     ToggleKey    = Enum.KeyCode.RightShift,
     UnloadKey    = Enum.KeyCode.Delete,
-    WidgetText   = "Scorp",
+    WidgetText   = "✦",
     ConfigFolder = "Scorp",
-    Starfield    = false,
+    Starfield    = true,
+    StarCount    = 42,
+    Nebula       = true,
+    BlurSize     = 12,
 })
 assert(type(Window) == "table" and type(Window.CreateTab) == "function",
     "[Scorp] incompatible UI library: Window:CreateTab is missing. Deploy/restart the server with src/ScorpLib.lua.")
@@ -153,101 +153,133 @@ end
 Window:SetWatermark(('<font color="rgb(168,186,214)">Scorp</font>  ·  %s %s'):format(
     tostring(ctx.releaseChannel or "production"), tostring(ctx.releaseVersion or ctx.build or "unversioned")))
 
--- ───────────────────────────────────────────────────────────────────────────
---  Home
--- ───────────────────────────────────────────────────────────────────────────
-local Home = Window:CreateTab("Home", { Icon = "🏄" })
-
-do
-    local sec = Home:CreateSection("Welcome", true)
-    sec:AddLabel("Scorp is running. Everything here is a placeholder.", { Wrap = true })
-    sec:AddLabel("Made by YOUR_NAME", { Color = Window.Theme.TextDim })
-    sec:AddButton("Test Notification", function()
-        Window:Notify("Scorp", "Notifications are working.", 3)
-    end)
-    sec:AddButton("Success Notification", function()
-        Window:Notify("Done", "This one uses the success colour.", 3, Window.Theme.Success)
-    end)
-end
-
-do
-    local sec = Home:CreateSection("Cosmic Core", true)
-    sec:AddToggle("Placeholder Feature 1", { Flag = "core_1", Callback = stub("Placeholder Feature 1") })
-    sec:AddToggle("Placeholder Feature 2", { Bindable = false, Flag = "core_2", Callback = stub("Placeholder Feature 2") })
-    sec:AddToggle("Placeholder Feature 3", { Bindable = false, Flag = "core_3", Callback = stub("Placeholder Feature 3") })
-    sec:AddSlider("Power Level", {
-        Min = 0, Max = 100, Default = 50, Increment = 1, Suffix = "%",
-        Flag = "core_power", Callback = stub("Power Level"),
-    })
-    sec:AddDropdown("Mode:", {
-        Options = { "Mode A", "Mode B", "Mode C" }, Default = "Mode A",
-        Flag = "core_mode", Callback = stub("Mode"),
-    })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Player
--- ───────────────────────────────────────────────────────────────────────────
-local Player = Window:CreateTab("Player", { Icon = "🌠" })
-
-do
-    local sec = Player:CreateSection("Movement", true)
-    sec:AddToggle("Movement Toggle 1", { Bindable = false, Flag = "move_1", Callback = stub("Movement Toggle 1") })
-    sec:AddToggle("Movement Toggle 2", { Bindable = false, Flag = "move_2", Callback = stub("Movement Toggle 2") })
-    sec:AddSlider("Value Slider 1", { Min = 0, Max = 100, Default = 16, Flag = "move_v1", Callback = stub("Value Slider 1") })
-    sec:AddSlider("Value Slider 2", { Min = 0, Max = 200, Default = 50, Flag = "move_v2", Callback = stub("Value Slider 2") })
-end
-
-do
-    local sec = Player:CreateSection("Character", false)
-    sec:AddToggle("Character Toggle", { Bindable = false, Flag = "char_1", Callback = stub("Character Toggle") })
-    sec:AddButton("Character Button", stub("Character Button"))
-    sec:AddKeybind("Character Keybind", { Default = Enum.KeyCode.F, Flag = "char_key", Callback = stub("Character Keybind") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Visuals
--- ───────────────────────────────────────────────────────────────────────────
-local Visuals = Window:CreateTab("Visuals", { Icon = "☄️" })
-
-do
-    local sec = Visuals:CreateSection("Glow", true)
-    sec:AddToggle("Enable Glow", { Bindable = false, Flag = "vis_glow", Callback = stub("Enable Glow") })
-    sec:AddColorPicker("Glow Color", {
-        Default = Color3.fromRGB(90, 210, 255), Flag = "vis_glow_color", Callback = stub("Glow Color"),
-    })
-    sec:AddSlider("Glow Strength", { Min = 0, Max = 100, Default = 40, Suffix = "%", Flag = "vis_glow_str", Callback = stub("Glow Strength") })
-end
-
-do
-    local sec = Visuals:CreateSection("Overlay", false)
-    sec:AddToggle("Overlay Toggle 1", { Bindable = false, Flag = "vis_o1", Callback = stub("Overlay Toggle 1") })
-    sec:AddToggle("Overlay Toggle 2", { Bindable = false, Flag = "vis_o2", Callback = stub("Overlay Toggle 2") })
-    sec:AddDropdown("Style:", { Options = { "Style 1", "Style 2", "Style 3" }, Default = "Style 1", Flag = "vis_style", Callback = stub("Style") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Misc
--- ───────────────────────────────────────────────────────────────────────────
-local Misc = Window:CreateTab("Misc", { Icon = "🌌" })
-
-do
-    local sec = Misc:CreateSection("Utilities", true)
-    sec:AddButton("Utility Button 1", stub("Utility Button 1"))
-    sec:AddButton("Utility Button 2", stub("Utility Button 2"))
-    sec:AddTextbox("Input", { Placeholder = "type something...", Flag = "misc_input", Callback = stub("Input") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Settings
--- ───────────────────────────────────────────────────────────────────────────
--- The free-tier editor owns a dedicated sidebar tab; staff controls are only
--- constructed after the server authorizes this session.
+-- Build only real tools into the navigation. The former Player, Visuals and
+-- Misc tabs were demo placeholders with callbacks that did nothing.
 local Editor = TagEditor.Build(Window, Nametags)
 local StaffPanel = staffAuthorized and AdminPanel and AdminPanel.Build(Window, ctx) or nil
 local TagManagerPanel = (tagManagerAuthorized and not staffAuthorized and TagPanel) and TagPanel.Build(Window, ctx) or nil
 local SupportStaffPanel = (supportAuthorized and not staffAuthorized and not tagManagerAuthorized and SupportPanel) and SupportPanel.Build(Window, ctx) or nil
 
+-- ───────────────────────────────────────────────────────────────────────────
+-- Overview dashboard
+-- ───────────────────────────────────────────────────────────────────────────
+local Home = Window:CreateTab("Overview", { Icon = "✦" })
+
+do
+    local hero = Home:CreateSection("YOUR SCORP SPACE", true)
+    local card = hero:AddCustom(142)
+    card.BackgroundColor3 = Window.Theme.ToggleOff
+    card.BackgroundTransparency = 0.12
+    card.BorderSizePixel = 0
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 14)
+    corner.Parent = card
+    local border = Instance.new("UIStroke")
+    border.Thickness = 1.5
+    border.Transparency = 0.2
+    border.Color = Window.Theme.AccentLight
+    border.Parent = card
+    local gradient = Instance.new("UIGradient")
+    gradient.Rotation = 18
+    gradient.Color = ColorSequence.new(Window.Theme.Accent, Window.Theme.AccentLight)
+    gradient.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.9), NumberSequenceKeypoint.new(1, 0.98) })
+    gradient.Parent = card
+
+    local kicker = Instance.new("TextLabel")
+    kicker.BackgroundTransparency = 1
+    kicker.Position = UDim2.new(0, 20, 0, 16)
+    kicker.Size = UDim2.new(1, -40, 0, 18)
+    kicker.Font = Enum.Font.GothamBold
+    kicker.Text = "✦   SCORP COMMUNITY EXPERIENCE"
+    kicker.TextColor3 = Window.Theme.AccentLight
+    kicker.TextSize = 11
+    kicker.TextXAlignment = Enum.TextXAlignment.Left
+    kicker.Parent = card
+
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.new(0, 18, 0, 39)
+    title.Size = UDim2.new(1, -36, 0, 38)
+    title.Font = Enum.Font.GothamBlack
+    title.Text = "MAKE YOUR NAME STAND OUT"
+    title.TextColor3 = Window.Theme.TextWhite
+    title.TextSize = 24
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.TextTruncate = Enum.TextTruncate.AtEnd
+    title.Parent = card
+
+    local subtitle = Instance.new("TextLabel")
+    subtitle.BackgroundTransparency = 1
+    subtitle.Position = UDim2.new(0, 20, 0, 80)
+    subtitle.Size = UDim2.new(1, -40, 0, 34)
+    subtitle.Font = Enum.Font.Montserrat
+    subtitle.Text = "Personalize your nametag, explore the community, and make Scorp yours."
+    subtitle.TextColor3 = Window.Theme.TextDim
+    subtitle.TextSize = 13
+    subtitle.TextWrapped = true
+    subtitle.TextXAlignment = Enum.TextXAlignment.Left
+    subtitle.Parent = card
+
+    Window:_bind(function(theme)
+        card.BackgroundColor3 = theme.ToggleOff
+        border.Color = theme.AccentLight
+        gradient.Color = ColorSequence.new(theme.Accent, theme.AccentLight)
+        kicker.TextColor3 = theme.AccentLight
+        title.TextColor3 = theme.TextWhite
+        subtitle.TextColor3 = theme.TextDim
+    end)
+end
+
+do
+    local sec = Home:CreateSection("AT A GLANCE", true)
+    local state = sec:AddLabel("SCORP ONLINE   ·   " .. tostring(ctx.releaseChannel or "production"):upper() .. " RELEASE\nWelcome, " .. tostring(LocalPlayer.DisplayName or LocalPlayer.Name) .. "   ·   " .. tostring(#Players:GetPlayers()) .. " players in this server", {
+        Wrap = true, TextSize = 13, Color = Window.Theme.TextWhite,
+    })
+    local function refreshStatus()
+        local characterState = LocalPlayer.Character and "Character ready" or "Waiting for character"
+        state:Set("●  SCORP ONLINE   ·   " .. tostring(ctx.releaseChannel or "production"):upper()
+            .. " RELEASE\nWelcome, " .. tostring(LocalPlayer.DisplayName or LocalPlayer.Name)
+            .. "   ·   " .. tostring(#Players:GetPlayers()) .. " players here   ·   " .. characterState)
+        Window:Notify("Overview refreshed", "Your Scorp client is ready.", 3, Window.Theme.Success)
+    end
+    sec:AddButton("Refresh Overview", refreshStatus)
+end
+
+do
+    local sec = Home:CreateSection("QUICK LAUNCH", true)
+    sec:AddLabel("Jump straight to the tools you actually use.", { Wrap = true, Color = Window.Theme.TextDim })
+    sec:AddButton("✦  Open Name Tag Studio", function() Editor.Open() end)
+    sec:AddButton("↻  Refresh Nearby Nametags", function()
+        Nametags.Refresh()
+        Window:Notify("Nametags", "Refreshing players in this server…", 3, Window.Theme.AccentLight)
+    end)
+    sec:AddButton("◉  Preview VIP Nametag", function()
+        Nametags.Preview("vip")
+        Window:Notify("Preview enabled", "Your personal tag is now showing the VIP style preview.", 4)
+    end)
+    sec:AddButton("×  Clear Nametag Preview", function()
+        Nametags.Preview(nil)
+        Window:Notify("Preview cleared", "Your normal nametag style is restored.", 3)
+    end)
+    if StaffPanel then
+        sec:AddButton("⚑  Open Staff Console", function() StaffPanel.Open() end)
+    elseif TagManagerPanel then
+        sec:AddButton("✦  Open Tag Studio · Staff", function() TagManagerPanel.Open() end)
+    elseif SupportStaffPanel then
+        sec:AddButton("?  Open Support Desk", function() SupportStaffPanel.Open() end)
+    end
+end
+
+do
+    local sec = Home:CreateSection("NAVIGATION", false)
+    sec:AddLabel("NAME TAGS\nDesign your colors, fonts, and effects in the Name Tags tab. Your Roblox username stays visible to the community.", { Wrap = true })
+    sec:AddLabel("PERSONALIZE\nOpen Settings to adjust the interface theme, save a config, and control how nametags appear.", { Wrap = true, Color = Window.Theme.TextDim })
+    sec:AddLabel("SHORTCUTS\nRightShift toggles this menu   ·   Delete unloads Scorp", { Wrap = true, Color = Window.Theme.AccentLight })
+end
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Settings
+-- ───────────────────────────────────────────────────────────────────────────
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
 Window:AddThemeControls(Settings, "🎨 Theme")
