@@ -158,7 +158,7 @@ function AdminPanel.Build(Window, ctx)
     end
 
     do
-        local sec = panel:CreateSection("Staff Overview", true)
+        local sec = panel:CreateSection("01 · Overview", true)
         sec:AddLabel("Server-authorized controls · every action is checked and audited.", { Wrap = true, Color = Window.Theme.TextDim })
         statusLabel = sec:AddLabel("Loading staff overview…", { Wrap = true, TextSize = 12 })
         sec:AddButton("Refresh Overview", refreshOverview)
@@ -166,7 +166,13 @@ function AdminPanel.Build(Window, ctx)
     end
 
     do
-        local sec = panel:CreateSection("Find a Player", true)
+        local sec = panel:CreateSection("02 · Access Review", false)
+        sec:AddButton("Refresh Access Lists", refreshOverview)
+        accessListsLabel = sec:AddLabel("Refresh to review active blacklists and allowlisted accounts.", { Wrap = true, Color = Window.Theme.TextDim, TextSize = 11 })
+    end
+
+    do
+        local sec = panel:CreateSection("03 · Find a Player", true)
         playersLabel = sec:AddLabel("Refresh to find script users in the current server.", { Wrap = true, Color = Window.Theme.TextDim })
         activePlayers = sec:AddDropdown("Active Script Users", { Options = {}, Callback = function(choice)
             local user = activeByChoice[choice]
@@ -181,9 +187,8 @@ function AdminPanel.Build(Window, ctx)
     end
 
     do
-        local sec = panel:CreateSection("Account Access", true)
+        local sec = panel:CreateSection("04 · Account Actions", false)
         sec:AddLabel("Choose an active user above or resolve a Roblox username, then select an action.", { Wrap = true, Color = Window.Theme.TextDim })
-        sec:AddButton("Refresh Active Players", refreshPlayers)
         sec:AddButton("Temporary Ban (tiered)", function()
             local id, reason = targetId(), reasonBox:Get()
             if not id then return end
@@ -238,13 +243,7 @@ function AdminPanel.Build(Window, ctx)
     end
 
     do
-        local sec = panel:CreateSection("Access Review", false)
-        accessListsLabel = sec:AddLabel("Refresh overview to review current blacklists and allowlisted accounts.", { Wrap = true, Color = Window.Theme.TextDim, TextSize = 11 })
-        sec:AddButton("Refresh Access Lists", refreshOverview)
-    end
-
-    do
-        local sec = panel:CreateSection("Nametag Design", false)
+        local sec = panel:CreateSection("05 · Nametag Design", false)
         sec:AddLabel("Set the account role, displayed role text, and a custom accent color. The Roblox username remains visible.", { Wrap = true, Color = Window.Theme.TextDim })
         rolePicker = sec:AddDropdown("Role", { Options = { "owner", "developer", "admin", "moderator", "support", "vip", "member" }, Default = "member" })
         roleTextBox = sec:AddTextbox("Role Text", { Default = "", Placeholder = "text shown on the tag (max 24)" })

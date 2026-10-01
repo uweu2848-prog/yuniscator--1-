@@ -1931,11 +1931,16 @@ function Window:CreatePopout(opts)
 
     local page = Make("ScrollingFrame", {
         Parent = frame, Size = UDim2.new(1, -12, 1, -50), Position = UDim2.new(0, 6, 0, 46), BackgroundTransparency = 1,
-        BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ZIndex = 80,
+        BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.None, ZIndex = 80,
     })
     win:_bind(function(t) page.ScrollBarImageColor3 = t.Accent end)
     Make("UIPadding", { Parent = page, PaddingTop = UDim.new(0, 6), PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 18), PaddingBottom = UDim.new(0, 20) })
-    Make("UIListLayout", { Parent = page, Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder })
+    local pageLayout = Make("UIListLayout", { Parent = page, Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder })
+    local function updatePageCanvas()
+        page.CanvasSize = UDim2.new(0, 0, 0, pageLayout.AbsoluteContentSize.Y + 24)
+    end
+    pageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updatePageCanvas)
+    task.defer(updatePageCanvas)
 
     -- Duck-types as a Tab (same .Window / .Page shape) so every existing Section:Add*
     -- control works completely unmodified inside a popout.
