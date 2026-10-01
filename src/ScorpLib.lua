@@ -63,6 +63,13 @@ local BASE = {
 -- Accent      = main chrome colour (borders, sliders, toggles)
 -- AccentLight = the "Power Cosmic" glow that trails the chrome sheen
 Library.Themes = {
+    ["Red & Black"]  = { Accent = Color3.fromRGB(255, 25, 40), AccentLight = Color3.fromRGB(255, 90, 105),
+                          MainBg = Color3.fromRGB(12, 12, 16), SidebarBg = Color3.fromRGB(16, 14, 18), ToggleOff = Color3.fromRGB(30, 25, 30),
+                          Success = Color3.fromRGB(90, 220, 130), Danger = Color3.fromRGB(255, 70, 80) },
+    ["Purple & Black"] = { Accent = Color3.fromRGB(180, 40, 255), AccentLight = Color3.fromRGB(210, 115, 255),
+                           MainBg = Color3.fromRGB(12, 10, 16), SidebarBg = Color3.fromRGB(16, 12, 20), ToggleOff = Color3.fromRGB(30, 22, 36) },
+    ["Monochrome"] = { Accent = Color3.fromRGB(230, 230, 238), AccentLight = Color3.fromRGB(255, 255, 255),
+                       MainBg = Color3.fromRGB(12, 13, 16), SidebarBg = Color3.fromRGB(17, 18, 22), ToggleOff = Color3.fromRGB(32, 33, 38) },
     -- Default: Cosmic Void — deep purple + electric cyan
     ["Cosmic Void"]   = { Accent = Color3.fromRGB(130, 60, 255),  AccentLight = Color3.fromRGB(0, 210, 255),
                           MainBg = Color3.fromRGB(6, 5, 16), SidebarBg = Color3.fromRGB(4, 3, 11), ToggleOff = Color3.fromRGB(18, 14, 40) },
@@ -77,7 +84,7 @@ Library.Themes = {
     ["Silver Surfer"] = { Accent = Color3.fromRGB(160, 180, 220), AccentLight = Color3.fromRGB(80, 210, 255),
                           MainBg = Color3.fromRGB(8, 9, 20), SidebarBg = Color3.fromRGB(5, 6, 14), ToggleOff = Color3.fromRGB(18, 22, 44) },
 }
-Library.ThemeOrder = { "Cosmic Void", "Nova Pulse", "Nebula Blue", "Solar Flare", "Void Emerald", "Silver Surfer" }
+Library.ThemeOrder = { "Red & Black", "Purple & Black", "Cosmic Void", "Nova Pulse", "Nebula Blue", "Solar Flare", "Void Emerald", "Silver Surfer", "Monochrome" }
 
 --- Add your own preset: Library:RegisterTheme("Sunset", { Accent = Color3.fromRGB(255,120,40) })
 function Library:RegisterTheme(name, preset)
@@ -2291,6 +2298,10 @@ end
 function Library:CreateSplash(opts)
     opts = opts or {}
     local kind = opts.Kind == "bye" and "bye" or "load"
+    local theme = opts.Theme or {
+        MainBg = Color3.fromRGB(12, 12, 16), ToggleOff = Color3.fromRGB(30, 25, 30),
+        Accent = Color3.fromRGB(255, 25, 40), TextWhite = Color3.fromRGB(250, 250, 255),
+    }
     local gui = Make("ScreenGui", {
         Name = kind == "bye" and "ScorpGoodbye" or "ScorpLoading",
         ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 1200,
@@ -2302,13 +2313,13 @@ function Library:CreateSplash(opts)
     pcall(function()
         canvas = Make("CanvasGroup", {
             Name = "Card", Parent = gui, Size = UDim2.fromScale(1, 1),
-            BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0,
+            BackgroundColor3 = theme.MainBg or Color3.new(0, 0, 0), BackgroundTransparency = 0,
             GroupTransparency = 1, BorderSizePixel = 0,
         })
     end)
     local root = canvas or Make("Frame", {
         Name = "Card", Parent = gui, Size = UDim2.fromScale(1, 1),
-        BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
+        BackgroundColor3 = theme.MainBg or Color3.new(0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
     })
 
     local logo = Make("ImageLabel", {
@@ -2320,7 +2331,7 @@ function Library:CreateSplash(opts)
     local fallback = Make("TextLabel", {
         Parent = root, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.38, 0),
         Size = UDim2.fromOffset(420, 80), BackgroundTransparency = 1,
-        Text = "S  C  O  R  P", TextColor3 = Color3.new(1, 1, 1),
+        Text = "S  C  O  R  P", TextColor3 = theme.TextWhite or Color3.new(1, 1, 1),
         Font = Enum.Font.GothamBlack, TextSize = 42, Visible = not logo.Visible,
     })
 
@@ -2328,7 +2339,7 @@ function Library:CreateSplash(opts)
         Parent = root, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.38, 150),
         Size = UDim2.fromOffset(320, 18), BackgroundTransparency = 1,
         Text = kind == "load" and "LOADING" or "",
-        TextColor3 = Color3.fromRGB(170, 170, 176), Font = Enum.Font.Gotham, TextSize = 13,
+        TextColor3 = theme.Accent or Color3.fromRGB(170, 170, 176), Font = Enum.Font.Gotham, TextSize = 13,
     })
     local status = Make("TextLabel", {
         Parent = root, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.38, 172),
@@ -2338,12 +2349,12 @@ function Library:CreateSplash(opts)
     })
     local track = Make("Frame", {
         Parent = root, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.38, 214),
-        Size = UDim2.fromOffset(220, 2), BackgroundColor3 = Color3.new(1, 1, 1),
+        Size = UDim2.fromOffset(220, 2), BackgroundColor3 = theme.ToggleOff or Color3.new(1, 1, 1),
         BackgroundTransparency = 0.75, BorderSizePixel = 0, Visible = kind == "load",
     })
     local fill = Make("Frame", {
         Parent = track, Size = UDim2.new(0.08, 0, 1, 0),
-        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+        BackgroundColor3 = theme.Accent or Color3.new(1, 1, 1), BorderSizePixel = 0,
     })
 
     if canvas then
@@ -2353,6 +2364,10 @@ function Library:CreateSplash(opts)
     end
 
     local api = { Gui = gui }
+    if type(opts.SoundId) == "string" and opts.SoundId ~= "" then
+        local sound = Make("Sound", { Parent = gui, Name = "ScorpIntroSound", SoundId = opts.SoundId, Volume = math.clamp(tonumber(opts.SoundVolume) or 0.45, 0, 1) })
+        api.Sound = sound
+    end
     function api:SetImage(id)
         if type(id) ~= "string" or id == "" then return end
         logo.Image = id
@@ -2378,6 +2393,7 @@ function Library:CreateSplash(opts)
     end
     function api:Play(done)
         task.spawn(function()
+            if api.Sound then pcall(function() api.Sound:Play() end) end
             if kind == "bye" then
                 task.wait(1.35)
                 fadeOut(done)

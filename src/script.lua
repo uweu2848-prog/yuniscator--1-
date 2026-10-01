@@ -29,6 +29,18 @@ local TagEditor = (function()
 --@include tageditor.lua
 end)()
 
+local Onboarding = (function()
+--@include onboarding.lua
+end)()
+
+local VisualPresets = (function()
+--@include visualpresets.lua
+end)()
+
+local PlayerRoster = (function()
+--@include playerroster.lua
+end)()
+
 -- Staff-panel code is fetched separately only after the server authorizes this session.
 local AdminPanel = nil
 local TagPanel = nil
@@ -49,7 +61,7 @@ ctx.lib = nil -- don't keep the library source sitting in the shared table
 local Window = Scorp:CreateWindow({
     Title        = "SCORP",
     Subtitle     = "Community · Identity · Experience",
-    Theme        = "Cosmic Void",
+    Theme        = "Red & Black",
     Size         = UDim2.fromOffset(940, 610),
     MinSize      = Vector2.new(760, 500),
     MaxSize      = Vector2.new(1240, 820),
@@ -61,6 +73,7 @@ local Window = Scorp:CreateWindow({
     StarCount    = 42,
     Nebula       = true,
     BlurSize     = 12,
+    StartHidden  = true,
 })
 assert(type(Window) == "table" and type(Window.CreateTab) == "function",
     "[Scorp] incompatible UI library: Window:CreateTab is missing. Deploy/restart the server with src/ScorpLib.lua.")
@@ -155,16 +168,50 @@ Window:SetWatermark(('<font color="rgb(168,186,214)">Scorp</font>  ·  %s %s'):f
 
 -- Build only real tools into the navigation. The former Player, Visuals and
 -- Misc tabs were demo placeholders with callbacks that did nothing.
-local Editor = TagEditor.Build(Window, Nametags)
+local Editor
 local StaffPanel = staffAuthorized and AdminPanel and AdminPanel.Build(Window, ctx) or nil
 local TagManagerPanel = (tagManagerAuthorized and not staffAuthorized and TagPanel) and TagPanel.Build(Window, ctx) or nil
 local SupportStaffPanel = (supportAuthorized and not staffAuthorized and not tagManagerAuthorized and SupportPanel) and SupportPanel.Build(Window, ctx) or nil
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Overview dashboard
--- ───────────────────────────────────────────────────────────────────────────
-local Home = Window:CreateTab("Overview", { Icon = "✦" })
+    sec:AddLabel("NAME TAGS\nDesign your colors, fonts, and effects in the Name Tags tab. Your Roblox username stays visible to the community.", { Wrap = true })
+    sec:AddLabel("PERSONALIZE\nOpen Theme Maker to switch palettes. Settings contains visibility, saved configs, and your menu key.", { Wrap = true, Color = Window.Theme.TextDim })
+    sec:AddLabel("SHORTCUTS\nRightShift opens or hides the menu   ·   Delete unloads Scorp", { Wrap = true, Color = Window.Theme.AccentLight })
 
+
+Editor = TagEditor.Build(Window, Nametags)
+local Roster = PlayerRoster.Build(Window, Players, LocalPlayer)
+
+local ThemeTab = Window:CreateTab("Theme Maker", { Icon = "🎨" })
+Window:AddThemeControls(ThemeTab, "INTERFACE PALETTES")
+do
+    local sec = ThemeTab:CreateSection("SCORP LOOK & FEEL", true)
+    sec:AddLabel("Choose a preset or adjust the accent color above. Palette changes repaint the menu immediately.", { Wrap = true, Color = Window.Theme.TextDim })
+    sec:AddButton("Restore Red & Black", function()
+        Window:SetTheme("Red & Black")
+        Window:Notify("Theme restored", "Red & Black is active.", 3, Window.Theme.Accent)
+    end)
+end
+
+local VisualsTab = Window:CreateTab("Visual Presets", { Icon = "◈" })
+do
+    local sec = VisualsTab:CreateSection("LOCAL COLOR GRADING", true)
+    sec:AddLabel("Lightweight local post-processing only. Presets add Scorp-owned effects and never rewrite the game's lighting settings.", {
+        Wrap = true, Color = Window.Theme.TextDim,
+    })
+    sec:AddDropdown("Visual style", {
+        Options = VisualPresets.List(), Default = "Off",
+        Callback = function(name)
+            local ok, err = VisualPresets.Apply(name)
+            if not ok then return Window:Notify("Visual preset", err or "Could not apply this preset.", 4, Window.Theme.Danger) end
+            Window:Notify("Visual preset", name == "Off" and "Local effects cleared." or (name .. " is active locally."), 3, Window.Theme.Accent)
+        end,
+    })
+    sec:AddButton("Clear Local Visual Effects", function()
+        VisualPresets.Stop()
+        Window:Notify("Visuals reset", "Scorp's local post-processing effects were removed.", 3, Window.Theme.Success)
+    end)
+end
 do
     local hero = Home:CreateSection("YOUR SCORP SPACE", true)
     local card = hero:AddCustom(142)
@@ -282,7 +329,6 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
-Window:AddThemeControls(Settings, "🎨 Theme")
 Window:AddConfigControls(Settings, "💾 Configs")
 
 do
@@ -350,6 +396,8 @@ ctx.revoke = function(message, updateRequired)
         if StaffPanel then pcall(StaffPanel.Destroy) end
         if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
         if SupportStaffPanel then pcall(SupportStaffPanel.Destroy) end
+        if Roster then pcall(Roster.Destroy) end
+        pcall(VisualPresets.Stop)
         pcall(Nametags.Stop)
         pcall(function() Window:Toggle(true) end)
         pcall(function() Window:Notify("Update Required", reason, 30, Window.Theme.Warning) end)
@@ -420,6 +468,8 @@ Window:OnUnload(function()
     if StaffPanel then pcall(StaffPanel.Destroy) end
     if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
     if SupportStaffPanel then pcall(SupportStaffPanel.Destroy) end
+    if Roster then pcall(Roster.Destroy) end
+    pcall(VisualPresets.Stop)
     Nametags.Stop()
 end)
 
@@ -451,4 +501,4 @@ Nametags.CreateHudButton(
     end
 )
 
-Window:Notify("Scorp", "Loaded. Press " .. Window.ToggleKey.Name .. " to toggle.", 4)
+Onboarding.Start(Scorp, Window, LocalPlayer, ctx)
