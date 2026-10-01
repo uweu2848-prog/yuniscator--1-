@@ -75,6 +75,7 @@ async function startServer(discordPort, extraEnv = {}) {
         SESSION_SECRET: 'scorp-integration-session-secret',
         RELEASE_CHANNEL: 'production',
         RELEASE_VERSION: 'test-prod',
+        JOIN_ALERTS: 'false',
         SESSION_COOLDOWN_MS: '1200',
         UNCONFIRMED_AFTER_SECONDS: '1',
         WATCHER_INTERVAL_MS: '300',
@@ -150,11 +151,21 @@ async function testServer(d) {
         ok(health.releaseChannel === 'production' && health.releaseVersion === 'test-prod', 'health identifies the configured release channel and version');
         ok(health.webhook.configured && health.ownerKeySet, 'health shows webhook + owner key configured');
         ok(await waitFor(() => has(d, /online/)), 'startup ping reached Discord', titles(d));
+        const onlineEmbed = d.received.find(e => /Scorp is online/.test(e.title));
+        ok(onlineEmbed && onlineEmbed.fields.length === 3 && /production/.test(onlineEmbed.fields[0].value), 'startup webhook summarizes release, build, and protection in three fields');
         const loader = await (await fetch(`${base}/loader.lua`)).text();
         ok(loader.includes('function(...)') && !loader.includes('__SERVER_URL__'), 'loader is served obfuscated with the URL filled in');
         ok(!loader.includes(base), 'server URL is not readable in the loader');
         const pubOverride = await (await fetch(`${base}/loader.lua`, { headers: { 'x-forwarded-proto': 'https' } })).text();
         ok(pubOverride.length > 1000, 'loader endpoint stable under proxy headers');
+
+        const joinServer = await startServer(d.port, { JOIN_ALERTS: 'true' });
+        try {
+            const joinUser = newUser({ userId: '9201', username: 'JoinNotice' });
+            const joinSession = await post(joinServer.base, '/api/session', joinUser);
+            const joinNotice = await waitFor(() => d.received.some(e => e.title === '🟢 New Scorp user' && e.fields.some(f => f.name === 'Account' && f.value.includes(joinUser.userId))));
+            ok(!!joinSession.json.token && joinNotice, 'a newly issued session creates a concise per-user webhook notice');
+        } finally { joinServer.stop(); }
 
         section('Session handshake');
         ok((await post(base, '/api/session', { userId: 'abc', username: 'x' })).status === 400, 'rejects a non-numeric userId');
@@ -192,25 +203,25 @@ async function testServer(d) {
         ok(s2.json.watermark !== s1.json.watermark && s2.json.build === s1.json.build && s2.json.payload !== s1.json.payload, 'each account gets a distinct personalized payload watermark for the same release');
         const hb1 = await post(base, '/api/heartbeat', { flags: ['H1'] }, bearer(s2.json.token));
         ok(hb1.status === 200, 'a single weak flag (H1) does not ban');
-        ok(await waitFor(() => has(d, /Tamper signal \(heartbeat\)/)), 'weak flag still produces a Discord alert', titles(d));
-        const alertEmbed = d.received.find(e => /Tamper signal/.test(e.title));
-        ok(alertEmbed && alertEmbed.fields.some(f => f.name === 'Codes' && f.value.includes('H1')) && alertEmbed.fields.some(f => f.value.includes(u2.userId)), 'alert names the user and explains the code');
+        ok(await waitFor(() => has(d, /Unusual client activity/)), 'weak flag still produces a Discord alert', titles(d));
+        const alertEmbed = d.received.find(e => /Unusual client activity/.test(e.title));
+        ok(alertEmbed && alertEmbed.fields.some(f => f.name === 'Checks' && f.value.includes('H1')) && alertEmbed.fields.some(f => f.name === 'Account' && f.value.includes(u2.userId)), 'alert names the user and explains the code');
         const alertNames = alertEmbed && alertEmbed.fields.map(f => f.name);
-        ok(alertNames && ['Executor / platform', 'Place / server', 'Session', 'Build'].every(n => alertNames.includes(n)), 'tamper webhook includes client, server, session, and build context');
+        ok(alertNames && ['Client', 'Server'].every(n => alertNames.includes(n)), 'tamper webhook keeps concise client and server context');
         await fetch(`${base}/api/admin/access/allowlist/${u2.userId}`, { method: 'PUT', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ allowed: true, reason: 'false-positive review', actor: 'test admin' }) });
         const allowlistedTamper = await post(base, '/api/heartbeat', { flags: ['C1', 'H2'] }, bearer(s2.json.token));
         ok(allowlistedTamper.status === 200, 'allowlisted accounts report tamper telemetry without automatic blacklisting');
-        ok(await waitFor(() => has(d, /allowlisted \(heartbeat\)/)), 'allowlisted signal still creates a review webhook');
+        ok(await waitFor(() => has(d, /Activity flagged · allowlisted account/)), 'allowlisted signal still creates a review webhook');
         const g3User = newUser();
         const g3Session = await post(base, '/api/session', { ...g3User, flags: ['G3'] });
         ok(g3Session.json.token, 'nested spy-GUI telemetry alone does not block startup');
-        ok(await waitFor(() => d.received.some(e => e.title.includes('session start') && e.fields.some(f => f.name === 'Codes' && f.value.includes('G3')))), 'server recognizes nested spy-GUI signal G3 in webhook telemetry');
+        ok(await waitFor(() => d.received.some(e => e.title.includes('Unusual client activity') && e.fields.some(f => f.name === 'Checks' && f.value.includes('G3')))), 'server recognizes nested spy-GUI signal G3 in webhook telemetry');
 
         const u3 = newUser();
         const s3 = await post(base, '/api/session', u3);
         const hb3 = await post(base, '/api/heartbeat', { flags: ['C1', 'H2'] }, bearer(s3.json.token));
         ok(hb3.status === 403 && hb3.json.revoked, 'strong flags (score ≥ 5) → immediate ban, heartbeat answers 403');
-        ok(await waitFor(() => has(d, /Offense #1.*1 day/)), 'ban alert reached Discord', titles(d));
+        ok(await waitFor(() => has(d, /Account blocked for 1 day/)), 'ban alert reached Discord', titles(d));
         await sleep(1300);
         const s3b = await post(base, '/api/session', u3);
         ok(s3b.status === 200 && s3b.json.token === null && /task\.wait/.test(s3b.json.payload), 'banned user gets the silent decoy, not an error');
@@ -260,13 +271,13 @@ async function testServer(d) {
         section('Payload delivered but never confirmed');
         const u5 = newUser();
         await post(base, '/api/session', u5);
-        ok(await waitFor(() => has(d, /never confirmed/), 6000), 'session that never heartbeats is reported as a possible dump', titles(d));
+        ok(await waitFor(() => has(d, /Session did not check in/), 6000), 'session that never heartbeats is reported for review', titles(d));
         const u6 = newUser();
         const s6 = await post(base, '/api/session', u6);
         await post(base, '/api/heartbeat', {}, bearer(s6.json.token));
-        const countBefore = d.received.filter(e => /never confirmed/.test(e.title)).length;
+        const countBefore = d.received.filter(e => /Session did not check in/.test(e.title)).length;
         await sleep(1800);
-        ok(d.received.filter(e => /never confirmed/.test(e.title)).length === countBefore, 'a session that did check in is not reported');
+        ok(d.received.filter(e => /Session did not check in/.test(e.title)).length === countBefore, 'a session that did check in is not reported');
 
         section('Nametag roster + roles');
         const A = newUser({ userId: '8001', username: 'Alice' }), B = newUser({ userId: '8002', username: 'Bob' }), C = newUser({ userId: '8003', username: 'Carol' });
@@ -513,7 +524,7 @@ async function testLua(d, S) {
     const glitchCode = ed && tagconfig.decodeCode(ed.glitchCode);
     ok(glitchTag && glitchCode && glitchTag.titleFont === 'Font.Michroma' && glitchCode.overrides.glitch === true && glitchCode.overrides.textAnimation === 'shimmer', 'glitch effect pack switches cleanly from rainbow while keeping the chosen font', glitchCode);
     ok(ed && ed.afterReset && ed.afterReset.title === 'Member' && ed.resetFontStyle === 'Classic' && ed.resetEffectPack === 'Classic Glow', 'reset restores the default preview and free preset selections');
-    ok(ed && ed.hasFreeNameTagsTab && !ed.hasFreeNameTagsShortcutInSettings, 'Free Name Tags is a main sidebar tab, not a Settings entry');
+    ok(ed && ed.hasFreeNameTagsTab && ed.hasTagEffectsTab && !ed.hasFreeNameTagsShortcutInSettings, 'Free Name Tags and Tag Effects are separate main sidebar tabs');
     ok(ed && !ed.hasStaffPanelButton && ed.toggleKeyHasConfigFlag, 'non-admin payload omits the staff button and registers the menu key for persistence');
     // The exported free preset code can be applied by the existing server/staff flow.
     const luaImport = await fetch(`${S.base}/api/admin/tags/6010/import`, { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ code: ed.glitchCode }) });
@@ -542,18 +553,18 @@ async function testLua(d, S) {
     const before = d.received.length;
     const spy1 = run('tamper.lua', { MY_ID: '9101', MY_NAME: 'Snoop', JOB_ID: 'L3', TAMPER: 'spy_global', HWID: 'LUA-SNOOP' });
     ok(spy1 && spy1.requests.some(r => r.path === '/api/heartbeat' && r.status === 200), 'spy-global session: loader still runs first time (1st strike)');
-    ok(await waitFor(() => d.received.slice(before).some(e => /Tamper signal/.test(e.title) && e.fields.some(f => f.value.includes('G2')))), 'Discord got a G2 alert from a real loader run', titles(d).slice(before));
+    ok(await waitFor(() => d.received.slice(before).some(e => /Unusual client activity/.test(e.title) && e.fields.some(f => f.value.includes('G2')))), 'Discord got a G2 alert from a real loader run', titles(d).slice(before));
     const nestedBefore = d.received.length;
     const nestedSpy = run('tamper.lua', { MY_ID: '9103', MY_NAME: 'NestedSpy', JOB_ID: 'L3', TAMPER: 'nested_spy', HWID: 'LUA-NESTED-SPY' });
     ok(nestedSpy && nestedSpy.requests.some(r => r.path === '/api/heartbeat' && r.status === 200), 'nested spy-GUI signal does not locally prevent startup');
-    ok(await waitFor(() => d.received.slice(nestedBefore).some(e => /Tamper signal/.test(e.title) && e.fields.some(f => f.value.includes('G3')))), 'Discord got a G3 nested-GUI alert from the real loader', titles(d).slice(nestedBefore));
+    ok(await waitFor(() => d.received.slice(nestedBefore).some(e => /Unusual client activity/.test(e.title) && e.fields.some(f => f.value.includes('G3')))), 'Discord got a G3 nested-GUI alert from the real loader', titles(d).slice(nestedBefore));
     await sleep(1300);
     const spy2 = run('tamper.lua', { MY_ID: '9101', MY_NAME: 'Snoop', JOB_ID: 'L3', TAMPER: 'spy_global', HWID: 'LUA-SNOOP' });
     ok(spy2 && spy2.prints.some(p => /Connecting to server/.test(p)) && spy2.tags.length === 0, 'second run with the same spy → banned → gets the freeze decoy, no tags');
     await sleep(1300);
     const strong = run('tamper.lua', { MY_ID: '9102', MY_NAME: 'Hooker', JOB_ID: 'L3', TAMPER: 'strong', HWID: 'LUA-HOOKER' });
     ok(strong && strong.prints.some(p => /Connecting to server/.test(p)), 'hooked pcall + wrapped request + spy global → banned on the first run');
-    ok(await waitFor(() => has(d, /Offense #1/)), 'ban alert in Discord', titles(d).slice(-4));
+    ok(await waitFor(() => has(d, /Account blocked for/)), 'ban alert in Discord', titles(d).slice(-4));
 }
 
 process.on('unhandledRejection', e => { console.error('UNHANDLED REJECTION:', e && e.stack || e); process.exitCode = 1; });

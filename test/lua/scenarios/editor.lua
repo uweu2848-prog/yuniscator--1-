@@ -6,6 +6,7 @@ return function(H)
     local out = { hasPreviewHolder = #H.customFrames >= 1, hasFreeNameTagsTab = false }
     for _, name in ipairs(H.createdTabs or {}) do
         if name == "Free Name Tags" then out.hasFreeNameTagsTab = true end
+        if name == "Tag Effects" then out.hasTagEffectsTab = true end
     end
     out.hasStaffPanelButton = H.controls["Admin Panel · Staff"] ~= nil
     out.toggleKeyHasConfigFlag = H.controls["Menu Toggle Key"] and H.controls["Menu Toggle Key"].Flag == "menu_toggle_key"

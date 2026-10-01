@@ -157,6 +157,7 @@ function makeStore() {
         setRole: (id, role, label) => { roles[String(id)] = { role, label: label || roleMeta[role]?.label }; return roles[String(id)]; },
         clearRole: id => { const had = String(id) in roles; delete roles[String(id)]; return had; },
         getRoles: () => roles,
+        getActiveUsers: () => [{ userId: '123', username: 'Tester', displayName: 'Test User', placeId: '456', jobId: 'private-job', lastSeen: Date.now() }],
         tags: {
             info,
             set: (id, options) => {
@@ -217,7 +218,7 @@ function makeStore() {
 async function testBot() {
     // command builder sanity
     const cmds = buildCommands(Object.keys(tagconfig.ROLE_META)).map(c => c.toJSON());
-    ok(cmds.map(c => c.name).sort().join(',') === 'access,nametag,panel,tag', 'buildCommands registers /access, /nametag, /panel, and /tag');
+    ok(cmds.map(c => c.name).sort().join(',') === 'access,nametag,panel,tag,users', 'buildCommands registers /access, /nametag, /panel, /tag, and /users');
     const panelJson = buildPanelComponents().map(row => row.toJSON());
     ok(panelJson.length === 2 && panelJson.reduce((n, row) => n + row.components.length, 0) >= 8, 'staff dashboard has button rows for access and tag tasks');
     ok(buildPanelModal('ban').toJSON().components.length === 2 && buildPanelModal('premium').toJSON().components.length === 3, 'dashboard actions open structured input modals');
@@ -235,6 +236,9 @@ async function testBot() {
     const panelCommand = fakeInteraction({ command: 'panel' });
     await handle(panelCommand);
     ok(panelCommand._replies[0]?.payload?.components?.length === 2 && panelCommand._replies[0]?.payload?.flags, '/panel posts a private interactive dashboard');
+    const usersCommand = fakeInteraction({ command: 'users' });
+    await handle(usersCommand);
+    ok(usersCommand._replies[0]?.payload?.content?.includes('Test User') && usersCommand._replies[0]?.payload?.content?.includes('Place `456`'), '/users lists active accounts without exposing HWID or IP');
     const banButton = fakeInteraction({ kind: 'button', customId: 'scorp:panel:ban' });
     await handle(banButton);
     ok(banButton._replies[0]?.type === 'modal' && banButton._replies[0].payload.custom_id === 'scorp:panel:submit:ban', 'Blacklist button opens the expected modal');

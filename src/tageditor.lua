@@ -20,14 +20,13 @@ end
 function TagEditor.Build(Window, Nametags)
     local DATA = Nametags.TAGDATA
     local D = DATA.defaults
+    local function notify(text) Window:Notify("Free Name Tags", text, 3) end
 
     local draft = {}
     local controls = {}
     local loading = false
     local worldPreview = false
-    local previewHolder, previewFrame, previewTween, exportLabel
-
-    local function notify(text) Window:Notify("Free Name Tags", text, 3) end
+    local previewHolder, effectPreviewHolder, previewFrame, previewTween, effectPreviewFrame, effectPreviewTween, exportLabel
 
     local function countKeys(t)
         local n = 0
@@ -48,7 +47,10 @@ function TagEditor.Build(Window, Nametags)
     local function rebuildPreview()
         if previewFrame then pcall(function() previewFrame:Destroy() end) previewFrame = nil end
         if previewTween then pcall(function() previewTween:Cancel() end) previewTween = nil end
+        if effectPreviewFrame then pcall(function() effectPreviewFrame:Destroy() end) effectPreviewFrame = nil end
+        if effectPreviewTween then pcall(function() effectPreviewTween:Cancel() end) effectPreviewTween = nil end
         if previewHolder then previewFrame, previewTween = Nametags.PreviewCard(previewHolder, draft) end
+        if effectPreviewHolder then effectPreviewFrame, effectPreviewTween = Nametags.PreviewCard(effectPreviewHolder, draft) end
         if worldPreview then Nametags.PreviewTag(draft) end
         updateExportViews()
     end
@@ -83,6 +85,7 @@ function TagEditor.Build(Window, Nametags)
     end
 
     local tab = Window:CreateTab("Free Name Tags", { Icon = "🏷️" })
+    local effectTab = Window:CreateTab("Tag Effects", { Icon = "✨" })
 
     do
         local sec = tab:CreateSection("Free Name Tags", true)
@@ -129,21 +132,6 @@ function TagEditor.Build(Window, Nametags)
     end
 
     do
-        local sec = tab:CreateSection("Effect Packs", true)
-        sec:AddLabel("Try a rainbow fade, glitch flicker, cosmic particles, or a clean low-key look.", { Wrap = true })
-        local options = {}
-        for _, name in ipairs(DATA.freeEffectPresetOrder) do options[#options + 1] = name end
-        controls.effect = sec:AddDropdown("Effect Pack:", {
-            Options = options, Default = "Classic Glow",
-            Callback = function(name)
-                if loading then return end
-                applyPreset({ "textAnimation", "effects", "glow", "pulse", "spin", "particles", "underlineSweep", "glitch", "grid", "logoMotion" }, DATA.freeEffectPresets[name])
-                notify(name .. " effect pack selected.")
-            end,
-        })
-    end
-
-    do
         local sec = tab:CreateSection("Premium Name Tags · Planned", false)
         sec:AddLabel("A future paid tier is planned for deeper customization, such as custom colors, expanded font choices, images, layout controls, and individual effect tuning. The free preset packs will remain available.", { Wrap = true, Color = Window.Theme.TextDim })
     end
@@ -166,6 +154,22 @@ function TagEditor.Build(Window, Nametags)
         end)
     end
 
+    do
+        local sec = effectTab:CreateSection("Effect Packs", true)
+        sec:AddLabel("Choose a ready-made animation pack. Each pack replaces the previous one, so effects won't stack or fight each other.", { Wrap = true })
+        effectPreviewHolder = sec:AddCustom(110)
+        local options = {}
+        for _, name in ipairs(DATA.freeEffectPresetOrder) do options[#options + 1] = name end
+        controls.effect = sec:AddDropdown("Effect Pack:", {
+            Options = options, Default = "Classic Glow",
+            Callback = function(name)
+                if loading then return end
+                applyPreset({ "textAnimation", "effects", "glow", "pulse", "spin", "particles", "underlineSweep", "glitch", "grid", "logoMotion" }, DATA.freeEffectPresets[name])
+                notify(name .. " effect pack selected.")
+            end,
+        })
+    end
+
     rebuildPreview()
 
     local api = {}
@@ -177,6 +181,7 @@ function TagEditor.Build(Window, Nametags)
     function api.Export() return Nametags.Export(draft) end
     function api.Destroy()
         if previewTween then pcall(function() previewTween:Cancel() end) previewTween = nil end
+        if effectPreviewTween then pcall(function() effectPreviewTween:Cancel() end) effectPreviewTween = nil end
         -- This tab belongs to the main window; cleanup only its preview and draft overlay.
         Nametags.PreviewTag(nil)
     end

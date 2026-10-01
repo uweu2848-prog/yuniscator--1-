@@ -80,7 +80,7 @@ const CONFIG = {
     STRIKE_SCORE: num(env.STRIKE_SCORE, 2),             // a session needs at least this score to count as a strike
     SUSPICIOUS_IDENTITY_COUNT: 3,
     SUSPICIOUS_WINDOW_MS: 60 * 60 * 1000,
-    JOIN_ALERTS: flag(env.JOIN_ALERTS, false), // set JOIN_ALERTS=true in .env to get a Discord ping on every connect
+    JOIN_ALERTS: flag(env.JOIN_ALERTS, true), // set JOIN_ALERTS=false to silence per-session join alerts
     SESSION_HISTORY_MAX: num(env.SESSION_HISTORY_MAX, 200), // how many past sessions to keep in memory
 };
 
@@ -93,14 +93,14 @@ const DEFAULT_LABEL = { owner: 'Owner', developer: 'Developer', admin: 'Admin', 
 
 // Server-side weights. The client's own "score" is never trusted, only its codes.
 const CODE_INFO = {
-    C1: [2, 'core Lua function replaced by a Lua closure (pcall/error/tostring/…)'],
-    H1: [1, 'request function is a Lua wrapper, not native'],
-    H2: [3, 'request/loadstring reference swapped after the loader started'],
-    H3: [1, 'game.HttpGet is a Lua wrapper'],
-    M1: [1, 'game __namecall/__index hooked with a Lua closure'],
-    G1: [2, 'HTTP-spy style GUI found in CoreGui/gethui'],
-    G2: [2, 'known spy global present in the environment'],
-        G3: [2, 'spy-like GUI found nested in CoreGui/gethui descendants'],
+    C1: [2, 'Core runtime functions were modified'],
+    H1: [1, 'The network request function was wrapped'],
+    H2: [3, 'The request or script loader changed after launch'],
+    H3: [1, 'The Roblox HTTP function was wrapped'],
+    M1: [1, 'Game API hooks were detected'],
+    G1: [2, 'A known network-inspection tool was detected'],
+    G2: [2, 'A known network-inspection marker was detected'],
+    G3: [2, 'A nested network-inspection tool was detected'],
 };
 
 fs.mkdirSync(CONFIG.DATA_DIR, { recursive: true });
@@ -288,16 +288,13 @@ async function checkWebhookAtStartup() {
     if (CONFIG.WEBHOOK_STARTUP_PING) {
         const b = getBuild();
         alert({
-            title: '✅ Scorp server online',
+            title: '✅ Scorp is online',
             color: 0x2ecc71,
-            description: 'Backend health check passed. Use the access controls and recent history commands in Discord to review accounts and tag entitlements. · discord.gg/scorp',
+            description: 'The backend is ready. · discord.gg/scorp',
             fields: [
-                { name: 'Payload build', value: `\`${b ? b.id : 'none'}\` · ${b ? `${(b.bytes / 1024).toFixed(1)} KB` : 'unavailable'}`, inline: true },
-                { name: 'Runtime', value: `Node ${process.version} · ${process.platform}`, inline: true },
-                { name: 'Enforcement', value: CONFIG.AUTO_BAN ? `automatic · score ${CONFIG.BAN_SCORE} · ${CONFIG.AUTO_BAN_THRESHOLD} strikes` : 'alerts only', inline: true },
-                { name: 'Owner exemption', value: CONFIG.OWNER_KEY ? 'configured' : 'NOT CONFIGURED', inline: true },
-                { name: 'Moderation', value: `${Object.keys(access.allowlist).length} allowlisted · ${accessHistory.length} audit events`, inline: true },
-                { name: 'Data store', value: `\`${path.basename(CONFIG.DATA_DIR)}\` · persistent`, inline: true },
+                { name: 'Release', value: `${CONFIG.RELEASE_CHANNEL} · ${CONFIG.RELEASE_VERSION}`, inline: true },
+                { name: 'Build', value: b ? `\`${b.id}\` · ${(b.bytes / 1024).toFixed(1)} KB` : 'unavailable', inline: true },
+                { name: 'Protection', value: CONFIG.AUTO_BAN ? 'Automatic blocking is on' : 'Alerts only', inline: true },
             ],
         });
     }
@@ -714,13 +711,12 @@ function trackIpCorrelation(userId, hwid, ip) {
         suspiciousIps.set(ip, { identities: [...seen.keys()], flaggedAt: t });
         if (!throttled(`ip:${ip}`, CONFIG.SUSPICIOUS_WINDOW_MS)) {
             alert({
-                title: '👥 Many accounts on one IP',
+                title: '👥 Several accounts share a network',
                 color: 0x9b59b6,
-                description: 'Review only — shared/school/mobile IPs can trigger this too. Nothing was blocked.',
+                description: 'Review only. Shared homes, schools, and mobile networks can trigger this; nothing was blocked.',
                 fields: [
-                    { name: 'IP', value: `\`${ip}\``, inline: true },
-                    { name: 'Identities (1h)', value: String(seen.size), inline: true },
-                    { name: 'Seen', value: [...seen.keys()].slice(0, 6).map(k => `\`${k}\``).join('\n') },
+                    { name: 'Accounts seen in the last hour', value: String(seen.size), inline: true },
+                    { name: 'Network address', value: `\`${ip}\``, inline: true },
                 ],
             });
         }
@@ -741,21 +737,14 @@ function scoreCodes(codes) { return codes.reduce((s, c) => s + (CODE_INFO[c] ? C
 function alertIdentityFields(who) {
     const session = issued.get(who.nonce) || {};
     const value = v => `\`${cleanStr(v || 'Unknown', 180)}\``;
-    const b = getBuild();
     return [
-        { name: 'Roblox account', value: `${value(who.username)} · ${value(who.userId)}`, inline: true },
-        { name: 'Role / access', value: `${roleFor(who.userId).role} · ${allowlistHas(who.userId) ? 'allowlisted' : 'standard'}`, inline: true },
-        { name: 'Executor / platform', value: `${value(session.executor || who.executor)} · ${value(session.platform || who.platform)}`, inline: true },
-        { name: 'Place / server', value: `${value(session.placeId || who.placeId)} · ${value(session.jobId || who.jobId)}`, inline: false },
-        { name: 'Session', value: `${value(who.nonce)} · ${session.confirmed ? 'confirmed' : 'not confirmed'}`, inline: false },
-        { name: 'Customer marker', value: value(session.watermark), inline: true },
-        { name: 'HWID', value: value(who.hwid), inline: true },
-        { name: 'IP', value: value(who.ip), inline: true },
-        { name: 'Build', value: value(session.buildId || (b && b.id)), inline: true },
+        { name: 'Account', value: `${value(who.username)} (#${cleanStr(who.userId || '?', 30)})`, inline: true },
+        { name: 'Client', value: `${cleanStr(session.executor || who.executor || 'Unknown', 60)} · ${cleanStr(session.platform || who.platform || 'Unknown', 30)}`, inline: true },
+        { name: 'Server', value: `${cleanStr(session.placeId || who.placeId || 'Unknown', 30)} · ${cleanStr(session.jobId || who.jobId || 'Unknown', 50)}`, inline: true },
     ];
 }
 
-function applyBan(root, who, reason) {
+function applyBan(root, who, reason, codes, source) {
     const g = groups[root] || { offenseCount: 0, bannedUntil: null, permanent: false, reasons: [] };
     g.offenseCount += 1;
     const tier = BAN_TIERS[Math.min(g.offenseCount - 1, BAN_TIERS.length - 1)];
@@ -769,11 +758,16 @@ function applyBan(root, who, reason) {
         reason: cleanStr(reason, 500), permanent: g.permanent, bannedUntil: g.bannedUntil,
     });
     strikes.delete(root);
-    const label = g.permanent ? 'PERMANENT' : TIER_LABEL[tier] || `${tier}ms`;
+    const label = g.permanent ? 'permanent' : TIER_LABEL[tier] || `${tier}ms`;
     alert({
-        title: `🚨 Offense #${g.offenseCount} — banned (${label})`,
+        title: `⛔ Account blocked for ${label}`,
         color: 0xe74c3c,
-        fields: [...alertIdentityFields(who), { name: 'Blacklist reason', value: reason }],
+        description: 'Scorp automatically blocked this account after suspicious activity.',
+        fields: [
+            ...alertIdentityFields(who),
+            { name: 'Why', value: `${source === 'session start' ? 'At sign-in' : 'During a session'}: ${(codes || []).map(c => CODE_INFO[c] ? CODE_INFO[c][1] : 'Unrecognized check').join('; ')}` },
+            { name: 'Device / network', value: `${cleanStr(who.hwid || 'Unknown', 80)} · ${cleanStr(who.ip || 'Unknown', 60)}`, inline: false },
+        ],
     });
 }
 
@@ -793,13 +787,12 @@ function handleFlags(who, rawCodes, source) {
     if (allowlistHas(who.userId)) {
         if (!throttled(`allowlisted:${who.userId}:${codes.join(',')}`, 10 * 60 * 1000)) {
             alert({
-                title: `🛡️ Tamper signal reviewed — allowlisted (${source})`,
+                title: '🛡️ Activity flagged · allowlisted account',
                 color: 0x3498db,
-                description: 'Signals are recorded for review, but automatic enforcement is skipped for this allowlisted account. Existing manual/automatic blacklists still apply.',
+                description: 'No automatic action was taken. Any existing blacklist still applies.',
                 fields: [...alertIdentityFields(who),
-                    { name: 'Signal score', value: String(scoreCodes(codes)), inline: true },
-                    { name: 'Detection codes', value: codes.map(c => `**${c}** — ${CODE_INFO[c] ? CODE_INFO[c][1] : 'unknown check'}`).join('\n') },
-                    { name: 'Allowlist note', value: access.allowlist[String(who.userId)].reason || 'Approved by staff' },
+                    { name: 'Checks', value: codes.map(c => `${c}: ${CODE_INFO[c] ? CODE_INFO[c][1] : 'unrecognized check'}`).join('\n') },
+                    { name: 'Staff note', value: access.allowlist[String(who.userId)].reason || 'Approved by staff' },
                 ],
             });
         }
@@ -815,22 +808,22 @@ function handleFlags(who, rawCodes, source) {
         strikeCount = set.size;
         if (CONFIG.AUTO_BAN && (score >= CONFIG.BAN_SCORE || strikeCount >= CONFIG.AUTO_BAN_THRESHOLD)) {
             const reason = `${source}: ${codes.join(',')} (score ${score}${strikeCount ? `, ${strikeCount} flagged session(s)` : ''})`;
-            applyBan(root, who, reason);
+            applyBan(root, who, reason, codes, source);
             return true;
         }
-        if (!CONFIG.AUTO_BAN) action = 'alert only (auto-ban is off)';
-        else action = `alert only — strike ${strikeCount}/${CONFIG.AUTO_BAN_THRESHOLD}`;
+        if (!CONFIG.AUTO_BAN) action = 'Review only · automatic blocking is off';
+        else action = `Review only · ${strikeCount}/${CONFIG.AUTO_BAN_THRESHOLD} flagged sessions`;
     }
 
     if (!throttled(`det:${root}:${codes.join(',')}`, 10 * 60 * 1000)) {
         alert({
-            title: `⚠️ Tamper signal (${source})`,
+            title: '⚠️ Unusual client activity',
             color: 0xf39c12,
+            description: `${source === 'session start' ? 'At sign-in' : 'During a session'}, Scorp detected checks that need review.`,
             fields: [
                 ...alertIdentityFields(who),
-                { name: 'Score', value: String(score), inline: true },
-                { name: 'Codes', value: codes.map(c => `**${c}** — ${CODE_INFO[c] ? CODE_INFO[c][1] : 'unknown check'}`).join('\n') },
-                { name: 'Action', value: action, inline: true },
+                { name: 'Checks', value: codes.map(c => `${c}: ${CODE_INFO[c] ? CODE_INFO[c][1] : 'unrecognized check'}`).join('\n') },
+                { name: 'Next step', value: action, inline: true },
             ],
         });
     }
@@ -846,12 +839,12 @@ setInterval(() => {
             s.alerted = true;
             const who = { ...s, nonce, ownerOk: false };
             alert({
-                title: '📦 Payload fetched but never confirmed',
+                title: '⏱️ Session did not check in',
                 color: 0xf1c40f,
-                description: 'No authenticated heartbeat arrived before the confirmation window expired. This can indicate a blocked connection or an incomplete session; it is a review signal, not proof of tampering. · discord.gg/scorp',
+                description: 'Scorp did not receive a check-in in time. This may be a connection issue; it is not proof of tampering.',
                 fields: [
                     ...alertIdentityFields(who),
-                    { name: 'Age', value: `${Math.round((t - s.issuedAt) / 1000)} seconds`, inline: true },
+                    { name: 'Time since launch', value: `${Math.round((t - s.issuedAt) / 1000)} seconds`, inline: true },
                 ],
             });
         }
@@ -1038,13 +1031,10 @@ app.post('/api/session', sessionLimiter, (req, res) => {
     // this session. Optional — off by default so you're not pinged on every single join.
     if (CONFIG.JOIN_ALERTS) {
         alert({
-            title: '🟢 Scorp session started',
+            title: '🟢 New Scorp user',
             color: 0x2ecc71,
-            description: 'A new session was issued. · discord.gg/scorp',
-            fields: [
-                ...alertIdentityFields({ ...who, nonce }),
-                { name: 'Owner-key session', value: ownerOk ? 'verified' : 'standard', inline: true },
-            ],
+            description: 'A user started Scorp. · discord.gg/scorp',
+            fields: alertIdentityFields({ ...who, nonce }),
         });
     }
 
@@ -1204,6 +1194,22 @@ app.get('/api/admin/sessions', (_req, res) => {
         }),
     });
 });
+
+function activeUsersSnapshot() {
+    const t = now();
+    return [...presence.values()]
+        .filter(p => t - p.lastSeen <= CONFIG.PRESENCE_TTL_MS)
+        .map(p => ({
+            userId: p.userId,
+            username: p.username,
+            displayName: p.displayName,
+            placeId: p.placeId || null,
+            jobId: p.jobId || null,
+            lastSeen: p.lastSeen,
+            ...roleFor(p.userId),
+        }))
+        .sort((a, b) => a.username.localeCompare(b.username));
+}
 
 // Executor usage stats across all currently-tracked issued sessions
 app.get('/api/admin/executor-stats', (_req, res) => {
@@ -1621,6 +1627,7 @@ function startDiscordBotIfConfigured() {
                 snapshot: moderationSnapshot,
                 history: limit => ({ total: accessHistory.length, events: accessHistory.slice(-Math.max(1, Math.min(Number(limit) || 100, 500))).reverse() }),
             },
+            getActiveUsers: activeUsersSnapshot,
             publicUrl: CONFIG.PUBLIC_URL,
             log,
         });

@@ -344,13 +344,16 @@ local function addGlitch(titleLabel, color)
         while titleLabel.Parent do
             task.wait(math.random(25, 60) / 10)
             if not titleLabel.Parent then break end
-            local orig = titleLabel.TextColor3
-            titleLabel.TextColor3 = color
-            titleLabel.Position = titleLabel.Position + UDim2.fromOffset(1, 0)
-            task.wait(0.04)
+            local baseTransparency = titleLabel.TextTransparency
+            local oldStroke = titleLabel:FindFirstChildOfClass("UIStroke")
+            local oldStrokeColor = oldStroke and oldStroke.Color
+            if oldStroke then oldStroke.Color = color end
+            local flash = TweenService:Create(titleLabel, TweenInfo.new(0.045, Enum.EasingStyle.Linear), { TextTransparency = 0.38 })
+            flash:Play()
+            task.wait(0.055)
             if not titleLabel.Parent then break end
-            titleLabel.TextColor3 = orig
-            titleLabel.Position = titleLabel.Position - UDim2.fromOffset(1, 0)
+            TweenService:Create(titleLabel, TweenInfo.new(0.09, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { TextTransparency = baseTransparency }):Play()
+            if oldStroke and oldStroke.Parent then oldStroke.Color = oldStrokeColor end
         end
     end)
 end
@@ -393,11 +396,12 @@ local function applyTextAnimation(titleLabel, kind, baseColor)
             ColorSequenceKeypoint.new(1, Color3.fromHSV(1, 1, 1)),
         })
         local grad = make("UIGradient", { Color = rainbow, Rotation = 0 }, titleLabel)
-        TweenService:Create(grad, TweenInfo.new(4.5, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = 360 }):Play()
+        TweenService:Create(grad, TweenInfo.new(3.8, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Offset = Vector2.new(1.25, 0) }):Play()
     elseif kind == "wave" then
+        local waveScale = make("UIScale", { Scale = 1 }, titleLabel)
         TweenService:Create(
-            titleLabel, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-            { Position = titleLabel.Position + UDim2.fromOffset(0, 2) }
+            waveScale, TweenInfo.new(1.35, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+            { Scale = 1.045 }
         ):Play()
     end
 end
@@ -897,8 +901,8 @@ function Nametags._buildHudButton(onEdit, onToggleScript)
         divider   = Color3.fromRGB(50,  38,  90),
     }
 
-    local PILL_W, PILL_H = 72, 30
-    local CARD_W, CARD_H = 230, 148
+    local PILL_W, PILL_H = 112, 34
+    local CARD_W, CARD_H = 250, 202
     local MARGIN         = 14   -- distance from right / top edge
 
     -- ── root ScreenGui ───────────────────────────────────────────────────
@@ -989,6 +993,10 @@ function Nametags._buildHudButton(onEdit, onToggleScript)
     card.Parent           = gui
     corner(card, 12)
     stroke(card, C.border, 1.2, 0.3)
+    local cardGradient = Instance.new("UIGradient")
+    cardGradient.Rotation = 90
+    cardGradient.Color = ColorSequence.new(Color3.fromRGB(21, 17, 39), C.bg)
+    cardGradient.Parent = card
 
     -- card header
     local hdr = Instance.new("Frame")
@@ -1024,25 +1032,28 @@ function Nametags._buildHudButton(onEdit, onToggleScript)
     div.ZIndex           = 5
     div.Parent           = card
 
-    -- ── action buttons ───────────────────────────────────────────────────
-    --  Layout: three equal-width buttons in one row at the bottom of the card
-    local BTN_H  = 34
-    local BTN_Y  = CARD_H - BTN_H - 14
-    local BTN_W  = math.floor((CARD_W - 28 - 8) / 3)   -- 3 cols with 4px gaps
+    -- Full-width stacked rows avoid clipped labels at small HUD/card widths.
+    local BTN_H = 38
+    local BTN_W = CARD_W - 28
 
-    local function makeBtn(text, col, xpos)
+    local function makeBtn(text, col, ypos)
         local b = Instance.new("TextButton")
         b.Size              = UDim2.fromOffset(BTN_W, BTN_H)
-        b.Position          = UDim2.fromOffset(xpos, BTN_Y)
+        b.Position          = UDim2.fromOffset(14, ypos)
         b.BackgroundColor3  = col
         b.Text              = text
         b.Font              = Enum.Font.GothamMedium
-        b.TextSize          = 11
+        b.TextSize          = 12
         b.TextColor3        = C.text
+        b.TextXAlignment    = Enum.TextXAlignment.Left
         b.AutoButtonColor   = false
         b.ZIndex            = 6
         b.Parent            = card
-        corner(b, 8)
+        corner(b, 9)
+        stroke(b, C.border, 1, 0.72)
+        local padding = Instance.new("UIPadding")
+        padding.PaddingLeft = UDim.new(0, 12)
+        padding.Parent = b
 
         b.MouseEnter:Connect(function()
             tween(b, 0.15, { BackgroundColor3 = col:Lerp(Color3.new(1,1,1), 0.08) }):Play()
@@ -1053,32 +1064,9 @@ function Nametags._buildHudButton(onEdit, onToggleScript)
         return b
     end
 
-    local x1 = 14
-    local x2 = x1 + BTN_W + 4
-    local x3 = x2 + BTN_W + 4
-
-    local hideBtn   = makeBtn("👁  Tag",         C.btnSec, x1)
-    local editBtn   = makeBtn("🏷  Edit Tag",    C.btnPri, x2)
-    local scriptBtn = makeBtn("≡  Open Script", C.btnSec, x3)
-
-    -- small sub-labels under each button
-    local function subLabel(text, xpos)
-        local l = Instance.new("TextLabel")
-        l.BackgroundTransparency = 1
-        l.Size       = UDim2.fromOffset(BTN_W, 14)
-        l.Position   = UDim2.fromOffset(xpos, BTN_Y + BTN_H + 3)
-        l.Font       = Enum.Font.Gotham
-        l.TextSize   = 10
-        l.Text       = text
-        l.TextColor3 = C.textDim
-        l.TextXAlignment = Enum.TextXAlignment.Center
-        l.ZIndex     = 6
-        l.Parent     = card
-        return l
-    end
-    local hideSubLabel   = subLabel("show/hide",   x1)
-    local editSubLabel   = subLabel("editor",       x2)
-    local scriptSubLabel = subLabel("toggle menu",  x3)
+    local hideBtn   = makeBtn("👁   Hide My Tag", C.btnSec, 50)
+    local editBtn   = makeBtn("🏷   Edit Free Name Tag", C.btnPri, 98)
+    local scriptBtn = makeBtn("≡   Hide Scorp Menu", C.btnSec, 146)
 
     -- ── card open/close animation ─────────────────────────────────────────
     local cardOpen   = false
@@ -1132,8 +1120,7 @@ function Nametags._buildHudButton(onEdit, onToggleScript)
     local tagVisible = true   -- tracks S.ShowSelf so the label stays accurate
 
     local function updateHideLabel()
-        hideBtn.Text       = tagVisible and "👁  Hide Tag" or "👁  Show Tag"
-        hideSubLabel.Text  = tagVisible and "my tag on"   or "my tag off"
+        hideBtn.Text = tagVisible and "👁   Hide My Tag" or "👁   Show My Tag"
     end
     updateHideLabel()
 
@@ -1141,8 +1128,7 @@ function Nametags._buildHudButton(onEdit, onToggleScript)
     local scriptVisible = true    -- assume script starts visible
     local function updateScriptLabel(visible)
         scriptVisible        = visible
-        scriptBtn.Text       = scriptVisible and "≡  Hide Menu" or "≡  Open Menu"
-        scriptSubLabel.Text  = scriptVisible and "menu open"   or "menu closed"
+        scriptBtn.Text       = scriptVisible and "≡   Hide Scorp Menu" or "≡   Open Scorp Menu"
         -- dim the dot when the window is hidden
         tween(dot, 0.2, { BackgroundColor3 = scriptVisible and C.accent or C.textDim }):Play()
     end

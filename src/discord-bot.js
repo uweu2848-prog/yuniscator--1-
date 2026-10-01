@@ -89,6 +89,12 @@ function buildPanelCommand() {
         .setDescription('Open the Scorp staff dashboard with buttons');
 }
 
+function buildUsersCommand() {
+    return new SlashCommandBuilder()
+        .setName('users')
+        .setDescription('List accounts currently running Scorp');
+}
+
 const robloxId = o => o.setName('roblox_id').setDescription('Roblox user id').setRequired(true);
 
 function buildTagCommand() {
@@ -170,7 +176,7 @@ function buildTagCommand() {
 }
 
 function buildCommands(roleNames) {
-    return [buildNametagCommand(roleNames), buildTagCommand(), buildAccessCommand(), buildPanelCommand()];
+    return [buildNametagCommand(roleNames), buildTagCommand(), buildAccessCommand(), buildPanelCommand(), buildUsersCommand()];
 }
 
 // Slash-command option name → tag option key, for the grouped subcommands.
@@ -202,8 +208,22 @@ function buildPanelComponents() {
             panelButton('premium', 'Premium Tag', ButtonStyle.Primary, '🏷️'),
             panelButton('style', 'Apply Style Pack', ButtonStyle.Secondary, '🎨'),
             panelButton('tagview', 'View Tag', ButtonStyle.Secondary, '👁️'),
+            panelButton('users', 'Active Users', ButtonStyle.Secondary, '🌐'),
         ),
     ];
+}
+
+function formatActiveUsers(users) {
+    if (!Array.isArray(users) || users.length === 0) return '**Scorp users online**\nNo active users right now.';
+    const now = Date.now();
+    const rows = users.slice(0, 35).map(user => {
+        const name = String(user.displayName || user.username || 'Unknown').replace(/[`*_~|]/g, '');
+        const account = String(user.username || 'Unknown').replace(/[`*_~|]/g, '');
+        const age = Math.max(0, Math.floor((now - Number(user.lastSeen || now)) / 1000));
+        return `• **${name}** (@${account}) · ID \`${user.userId}\` · Place \`${user.placeId || 'unknown'}\` · active ${age}s ago`;
+    });
+    if (users.length > rows.length) rows.push(`…and ${users.length - rows.length} more`);
+    return `**Scorp users online · ${users.length}**\n${rows.join('\n')}`.slice(0, 1900);
 }
 
 function buildPanelModal(action) {
@@ -284,6 +304,11 @@ function createHandler(deps) {
 
     async function handlePanelButton(interaction) {
         const action = interaction.customId.slice(PANEL_PREFIX.length);
+        if (action === 'users') {
+            const users = typeof deps.getActiveUsers === 'function' ? deps.getActiveUsers() : [];
+            const text = formatActiveUsers(users);
+            return void (await interaction.update({ content: text, components: buildPanelComponents() }));
+        }
         if (action === 'overview') {
             return void (await interaction.update({ content: panelOverviewText(), components: buildPanelComponents() }));
         }
@@ -513,6 +538,11 @@ function createHandler(deps) {
         await showTag(interaction, id, { content: `✅ Updated ${Object.keys(patch).map(k => `\`${k}\``).join(', ')} for \`${id}\`.` });
     }
 
+    async function handleUsers(interaction) {
+        const users = typeof deps.getActiveUsers === 'function' ? deps.getActiveUsers() : [];
+        await interaction.reply({ content: formatActiveUsers(users), flags: EPHEMERAL });
+    }
+
     return async function handle(interaction) {
         try {
             if (interaction.isButton && interaction.isButton() && interaction.customId?.startsWith(PANEL_PREFIX)) {
@@ -528,13 +558,14 @@ function createHandler(deps) {
                 const choices = isAllowed(interaction) ? suggestions(interaction.options.getFocused(true)) : [];
                 return void (await interaction.respond(choices));
             }
-            if (!interaction.isChatInputCommand() || !['nametag', 'tag', 'access', 'panel'].includes(interaction.commandName)) return;
+            if (!interaction.isChatInputCommand() || !['nametag', 'tag', 'access', 'panel', 'users'].includes(interaction.commandName)) return;
             if (!isAllowed(interaction)) {
                 return void (await interaction.reply({ content: "You don't have permission to use this.", flags: EPHEMERAL }));
             }
             if (interaction.commandName === 'panel') {
                 return void (await interaction.reply({ content: panelOverviewText(), components: buildPanelComponents(), flags: EPHEMERAL }));
             }
+            if (interaction.commandName === 'users') return await handleUsers(interaction);
             if (interaction.commandName === 'nametag') await handleNametag(interaction);
             else if (interaction.commandName === 'tag') await handleTag(interaction);
             else await handleAccess(interaction);
@@ -566,7 +597,7 @@ function startDiscordBot(opts) {
         const rest = new REST({ version: '10' }).setToken(token);
         const route = guildId ? Routes.applicationGuildCommands(clientId, guildId) : Routes.applicationCommands(clientId);
         rest.put(route, { body: buildCommands(roleNames).map(c => c.toJSON()) })
-            .then(() => say(`[discord-bot] slash commands registered: /panel, /nametag, /tag, /access${guildId ? ' (guild-scoped)' : ' (global — allow up to an hour)'}`))
+            .then(() => say(`[discord-bot] slash commands registered: /panel, /users, /nametag, /tag, /access${guildId ? ' (guild-scoped)' : ' (global — allow up to an hour)'}`))
             .catch(e => say(`[discord-bot] failed to register slash commands: ${e.message}`));
     } else {
         say('[discord-bot] DISCORD_CLIENT_ID not set — slash commands were not registered.');
