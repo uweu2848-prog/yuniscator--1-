@@ -155,7 +155,7 @@ async function testServer(d) {
         ok((await post(base, '/api/session', { userId: 'abc', username: 'x' })).status === 400, 'rejects a non-numeric userId');
         const u1 = newUser();
         const s1 = await post(base, '/api/session', u1);
-        ok(s1.status === 200 && s1.json.token && s1.json.payload.startsWith('local _0x') && s1.json.lib.includes('SCORP UI LIBRARY'), 'returns token + built payload + UI library');
+        ok(s1.status === 200 && s1.json.token && s1.json.payload.startsWith('local _0x') && s1.json.lib.includes('SCORP UI LIBRARY') && s1.json.lib.includes('function Window:CreateTab'), 'returns payload with a UI library that implements the expected tab API');
         ok(!s1.json.payload.includes('Placeholder Feature'), 'payload is obfuscated');
         ok((await post(base, '/api/session', u1)).status === 429, 'same identity re-requesting inside the cooldown is refused');
         ok((await post(base, '/api/heartbeat', {})).status === 401, 'heartbeat without a token → 401');

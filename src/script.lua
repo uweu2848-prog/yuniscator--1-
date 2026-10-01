@@ -62,6 +62,8 @@ local Window = Scorp:CreateWindow({
     ConfigFolder = "Scorp",
     Starfield    = false,
 })
+assert(type(Window) == "table" and type(Window.CreateTab) == "function",
+    "[Scorp] incompatible UI library: Window:CreateTab is missing. Deploy/restart the server with src/ScorpLib.lua.")
 
 Window:SetWatermark('<font color="rgb(168,186,214)">Scorp</font>  ·  placeholder build')
 
