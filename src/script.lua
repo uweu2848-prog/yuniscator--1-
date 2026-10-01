@@ -29,18 +29,6 @@ local TagEditor = (function()
 --@include tageditor.lua
 end)()
 
-local Onboarding = (function()
---@include onboarding.lua
-end)()
-
-local VisualPresets = (function()
---@include visualpresets.lua
-end)()
-
-local PlayerRoster = (function()
---@include playerroster.lua
-end)()
-
 -- Staff-panel code is fetched separately only after the server authorizes this session.
 local AdminPanel = nil
 local TagPanel = nil
@@ -61,7 +49,7 @@ ctx.lib = nil -- don't keep the library source sitting in the shared table
 local Window = Scorp:CreateWindow({
     Title        = "SCORP",
     Subtitle     = "Community · Identity · Experience",
-    Theme        = "Red & Black",
+    Theme        = "Cosmic Void",
     Size         = UDim2.fromOffset(940, 610),
     MinSize      = Vector2.new(760, 500),
     MaxSize      = Vector2.new(1240, 820),
@@ -73,7 +61,6 @@ local Window = Scorp:CreateWindow({
     StarCount    = 42,
     Nebula       = true,
     BlurSize     = 12,
-    StartHidden  = true,
 })
 assert(type(Window) == "table" and type(Window.CreateTab) == "function",
     "[Scorp] incompatible UI library: Window:CreateTab is missing. Deploy/restart the server with src/ScorpLib.lua.")
@@ -168,46 +155,15 @@ Window:SetWatermark(('<font color="rgb(168,186,214)">Scorp</font>  ·  %s %s'):f
 
 -- Build only real tools into the navigation. The former Player, Visuals and
 -- Misc tabs were demo placeholders with callbacks that did nothing.
-local Editor
-local StaffPanel, TagManagerPanel, SupportStaffPanel
-local quickLaunchSection
+local Editor = TagEditor.Build(Window, Nametags)
+local StaffPanel = staffAuthorized and AdminPanel and AdminPanel.Build(Window, ctx) or nil
+local TagManagerPanel = (tagManagerAuthorized and not staffAuthorized and TagPanel) and TagPanel.Build(Window, ctx) or nil
+local SupportStaffPanel = (supportAuthorized and not staffAuthorized and not tagManagerAuthorized and SupportPanel) and SupportPanel.Build(Window, ctx) or nil
 
 -- ───────────────────────────────────────────────────────────────────────────
-local Home = Window:CreateTab("Overview", { Icon = "✦", Default = true })
-
-Editor = TagEditor.Build(Window, Nametags)
-local Roster = PlayerRoster.Build(Window, Players, LocalPlayer)
-
-local ThemeTab = Window:CreateTab("Theme Maker", { Icon = "🎨" })
-Window:AddThemeControls(ThemeTab, "INTERFACE PALETTES")
-do
-    local sec = ThemeTab:CreateSection("SCORP LOOK & FEEL", true)
-    sec:AddLabel("Choose a preset or adjust the accent color above. Palette changes repaint the menu immediately.", { Wrap = true, Color = Window.Theme.TextDim })
-    sec:AddButton("Restore Red & Black", function()
-        Window:SetTheme("Red & Black")
-        Window:Notify("Theme restored", "Red & Black is active.", 3, Window.Theme.Accent)
-    end)
-end
-
-local VisualsTab = Window:CreateTab("Visual Presets", { Icon = "◈" })
-do
-    local sec = VisualsTab:CreateSection("LOCAL COLOR GRADING", true)
-    sec:AddLabel("Lightweight local post-processing only. Presets add Scorp-owned effects and never rewrite the game's lighting settings.", {
-        Wrap = true, Color = Window.Theme.TextDim,
-    })
-    sec:AddDropdown("Visual style", {
-        Options = VisualPresets.List(), Default = "Off",
-        Callback = function(name)
-            local ok, err = VisualPresets.Apply(name)
-            if not ok then return Window:Notify("Visual preset", err or "Could not apply this preset.", 4, Window.Theme.Danger) end
-            Window:Notify("Visual preset", name == "Off" and "Local effects cleared." or (name .. " is active locally."), 3, Window.Theme.Accent)
-        end,
-    })
-    sec:AddButton("Clear Local Visual Effects", function()
-        VisualPresets.Stop()
-        Window:Notify("Visuals reset", "Scorp's local post-processing effects were removed.", 3, Window.Theme.Success)
-    end)
-end
+-- Overview dashboard
+-- ───────────────────────────────────────────────────────────────────────────
+local Home = Window:CreateTab("Overview", { Icon = "✦" })
 
 do
     local hero = Home:CreateSection("YOUR SCORP SPACE", true)
@@ -291,7 +247,6 @@ end
 
 do
     local sec = Home:CreateSection("QUICK LAUNCH", true)
-    quickLaunchSection = sec
     sec:AddLabel("Jump straight to the tools you actually use.", { Wrap = true, Color = Window.Theme.TextDim })
     sec:AddButton("✦  Open Name Tag Studio", function() Editor.Open() end)
     sec:AddButton("↻  Refresh Nearby Nametags", function()
@@ -306,6 +261,13 @@ do
         Nametags.Preview(nil)
         Window:Notify("Preview cleared", "Your normal nametag style is restored.", 3)
     end)
+    if StaffPanel then
+        sec:AddButton("⚑  Open Staff Console", function() StaffPanel.Open() end)
+    elseif TagManagerPanel then
+        sec:AddButton("✦  Open Tag Studio · Staff", function() TagManagerPanel.Open() end)
+    elseif SupportStaffPanel then
+        sec:AddButton("?  Open Support Desk", function() SupportStaffPanel.Open() end)
+    end
 end
 
 do
@@ -320,34 +282,7 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
 
--- Build the privileged panels only after the public tabs and their content
--- exist. A staff-module/UI incompatibility should not blank the entire menu.
-local function tryBuildStaffPanel(label, module)
-    if type(module) ~= "table" or type(module.Build) ~= "function" then return nil end
-    local ok, panel = pcall(module.Build, Window, ctx)
-    if not ok or type(panel) ~= "table" then
-        warn("[Scorp] " .. label .. " panel initialization failed: " .. tostring(panel))
-        return nil
-    end
-    return panel
-end
-
-if staffAuthorized then
-    StaffPanel = tryBuildStaffPanel("admin", AdminPanel)
-elseif tagManagerAuthorized then
-    TagManagerPanel = tryBuildStaffPanel("tag manager", TagPanel)
-elseif supportAuthorized then
-    SupportStaffPanel = tryBuildStaffPanel("support", SupportPanel)
-end
-
-if StaffPanel then
-    quickLaunchSection:AddButton("⚑  Open Staff Console", function() StaffPanel.Open() end)
-elseif TagManagerPanel then
-    quickLaunchSection:AddButton("✦  Open Tag Studio · Staff", function() TagManagerPanel.Open() end)
-elseif SupportStaffPanel then
-    quickLaunchSection:AddButton("?  Open Support Desk", function() SupportStaffPanel.Open() end)
-end
-
+Window:AddThemeControls(Settings, "🎨 Theme")
 Window:AddConfigControls(Settings, "💾 Configs")
 
 do
@@ -415,8 +350,6 @@ ctx.revoke = function(message, updateRequired)
         if StaffPanel then pcall(StaffPanel.Destroy) end
         if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
         if SupportStaffPanel then pcall(SupportStaffPanel.Destroy) end
-        if Roster then pcall(Roster.Destroy) end
-        pcall(VisualPresets.Stop)
         pcall(Nametags.Stop)
         pcall(function() Window:Toggle(true) end)
         pcall(function() Window:Notify("Update Required", reason, 30, Window.Theme.Warning) end)
@@ -487,8 +420,6 @@ Window:OnUnload(function()
     if StaffPanel then pcall(StaffPanel.Destroy) end
     if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
     if SupportStaffPanel then pcall(SupportStaffPanel.Destroy) end
-    if Roster then pcall(Roster.Destroy) end
-    pcall(VisualPresets.Stop)
     Nametags.Stop()
 end)
 
@@ -520,4 +451,4 @@ Nametags.CreateHudButton(
     end
 )
 
-Onboarding.Start(Scorp, Window, LocalPlayer, ctx)
+Window:Notify("Scorp", "Loaded. Press " .. Window.ToggleKey.Name .. " to toggle.", 4)
