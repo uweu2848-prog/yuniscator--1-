@@ -285,17 +285,73 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 -- The loader calls this if the server revokes the session mid-run.
 ctx.revoke = function(message, updateRequired)
+    local reason = tostring(message or (updateRequired and "Scorp was updated. Relaunch the latest loader to continue." or "Your Scorp session was revoked."))
     if updateRequired then
         pcall(Editor.Destroy)
         if StaffPanel then pcall(StaffPanel.Destroy) end
         if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
         pcall(Nametags.Stop)
         pcall(function() Window:Toggle(true) end)
-        pcall(function() Window:Notify("Update Required", tostring(message or "Scorp was updated. Relaunch the latest loader to continue."), 30, Window.Theme.Warning) end)
+        pcall(function() Window:Notify("Update Required", reason, 30, Window.Theme.Warning) end)
         task.delay(30.5, function() pcall(function() Window:Destroy(true) end) end)
         return
     end
-    pcall(function() Window:Destroy(true) end)
+
+    local overlay = Instance.new("ScreenGui")
+    overlay.Name = "ScorpRevokedNotice"
+    overlay.ResetOnSpawn = false
+    overlay.IgnoreGuiInset = true
+    overlay.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    overlay.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+
+    local panel = Instance.new("Frame")
+    panel.Name = "Panel"
+    panel.AnchorPoint = Vector2.new(0.5, 0.5)
+    panel.Position = UDim2.new(0.5, 0, 0.5, 0)
+    panel.Size = UDim2.fromScale(0.42, 0.18)
+    panel.BackgroundColor3 = Color3.fromRGB(20, 12, 16)
+    panel.BorderSizePixel = 0
+    panel.Parent = overlay
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 18)
+    corner.Parent = panel
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(210, 62, 89)
+    stroke.Transparency = 0.2
+    stroke.Parent = panel
+
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, -32, 0, 28)
+    title.Position = UDim2.new(0, 16, 0, 16)
+    title.BackgroundTransparency = 1
+    title.Text = "Scorp access revoked"
+    title.TextColor3 = Color3.fromRGB(255, 240, 246)
+    title.TextSize = 20
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = panel
+
+    local body = Instance.new("TextLabel")
+    body.Name = "Body"
+    body.Size = UDim2.new(1, -32, 0, 58)
+    body.Position = UDim2.new(0, 16, 0, 52)
+    body.BackgroundTransparency = 1
+    body.Text = reason
+    body.TextColor3 = Color3.fromRGB(220, 210, 214)
+    body.TextSize = 14
+    body.Font = Enum.Font.Gotham
+    body.TextWrapped = true
+    body.TextXAlignment = Enum.TextXAlignment.Left
+    body.TextYAlignment = Enum.TextYAlignment.Top
+    body.Parent = panel
+
+    pcall(function() Window:Notify("Access Revoked", reason, 10, Window.Theme.Danger) end)
+    task.delay(8, function() if overlay and overlay.Parent then overlay:Destroy() end end)
+    task.delay(0.3, function() pcall(function() Window:Destroy(true) end) end)
 end
 
 Window:OnUnload(function()

@@ -256,7 +256,7 @@ async function testServer(d) {
         const u3 = newUser();
         const s3 = await post(base, '/api/session', u3);
         const hb3 = await post(base, '/api/heartbeat', { flags: ['C1', 'H2'] }, bearer(s3.json.token));
-        ok(hb3.status === 403 && hb3.json.revoked, 'strong flags (score ≥ 5) → immediate ban, heartbeat answers 403');
+        ok(hb3.status === 403 && hb3.json.revoked && /revoked|blacklist/i.test(hb3.json.message || ''), 'strong flags → 403 with a user-readable revoked message');
         ok(await waitFor(() => has(d, /Account blocked for 1 day/)), 'ban alert reached Discord', titles(d));
         await sleep(1300);
         const s3b = await post(base, '/api/session', u3);

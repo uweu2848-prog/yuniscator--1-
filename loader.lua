@@ -438,7 +438,8 @@ task.spawn(function()
             if reply and reply.updateRequired then
                 revoke(reply.updateMessage or "Scorp was updated. Relaunch the latest loader to continue.", true)
             else
-                revoke()
+                local reason = reply and (reply.message or reply.error or "Your Scorp session was revoked.") or "Your Scorp session was revoked."
+                revoke(reason)
             end
             break
         elseif status == 401 then

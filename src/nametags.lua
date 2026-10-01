@@ -711,32 +711,46 @@ local function updateLOD(t)
         elseif d > T.distFull then scale = 1 - 0.25 * (d - T.distFull) / math.max(1, T.distMini - T.distFull) end
     end
     if t.state == state and math.abs((t.scale or 1) - scale) < 0.02 then return end
+
+    local function tweenOnce(key, target, props, dur)
+        local current = t[key]
+        if current then pcall(function() current:Cancel() end) end
+        local tw = TweenService:Create(target, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+        t[key] = tw
+        tw:Play()
+    end
+
     t.state, t.scale = state, scale
     P.gui.Enabled = state ~= "hidden"
-    P.scale.Scale = scale
     local mini = state == "mini"
     local w, h = P.cardW, P.cardH
     if mini then w, h = T.miniSize, T.miniSize end
-    P.card.Size = UDim2.fromOffset(w, h)
+
+    tweenOnce("cardTween", P.card, { Size = UDim2.fromOffset(w, h) }, 0.18)
     P.corner.CornerRadius = mini and UDim.new(1, 0) or UDim.new(0, 13)
-    if P.glow then P.glow.Size = UDim2.fromOffset(w + 6, h + 6) end
+    if P.glow then tweenOnce("glowTween", P.glow, { Size = UDim2.fromOffset(w + 6, h + 6) }, 0.18) end
+    tweenOnce("scaleTween", P.scale, { Scale = scale }, 0.18)
     P.title.Visible = not mini
     if P.nameLabel then P.nameLabel.Visible = not mini end
     if P.brandLabel then P.brandLabel.Visible = not mini end
     if P.miniButton then P.miniButton.Visible = mini end
     if P.underline then P.underline.Visible = not mini end
     if mini then
-        P.badge.AnchorPoint = Vector2.new(0.5, 0.5)
-        P.badge.Position = UDim2.new(0.5, 0, 0.5, 0)
-        P.badge.Size = UDim2.fromOffset(math.max(12, T.miniSize - 8), math.max(12, T.miniSize - 8))
+        tweenOnce("badgeTween", P.badge, {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            Size = UDim2.fromOffset(math.max(12, T.miniSize - 8), math.max(12, T.miniSize - 8)),
+        }, 0.18)
         if P.logoTween then pcall(function() P.logoTween:Cancel() end) end
     else
-        P.badge.AnchorPoint = Vector2.new(0, 0.5)
-        P.badge.Position = UDim2.new(0, P.pad, 0.5, 0)
-        P.badge.Size = UDim2.fromOffset(P.badgeSize, P.badgeSize)
+        tweenOnce("badgeTween", P.badge, {
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, P.pad, 0.5, 0),
+            Size = UDim2.fromOffset(P.badgeSize, P.badgeSize),
+        }, 0.18)
         if P.logoTween then pcall(function() P.logoTween:Play() end) end
     end
-    P.gui.StudsOffset = Vector3.new(0, mini and T.offsetMini or T.offsetFull, 0)
+    tweenOnce("guiTween", P.gui, { StudsOffset = Vector3.new(0, mini and T.offsetMini or T.offsetFull, 0) }, 0.18)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════

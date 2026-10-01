@@ -985,7 +985,13 @@ function requireToken(req, res, next) {
     req.who = whoFromToken(req, claims);
     if (!req.who.ownerOk) {
         const root = linkIdentity(req.who.userId, req.who.hwid);
-        if (isGroupBanned(root)) return res.status(403).json({ ok: false, revoked: true });
+        if (isGroupBanned(root)) {
+            return res.status(403).json({
+                ok: false,
+                revoked: true,
+                message: 'This Scorp session was revoked because this account is blacklisted or blocked by staff.',
+            });
+        }
     }
     const s = issued.get(claims.n);
     if (s) s.confirmed = true;
@@ -1200,8 +1206,13 @@ app.post('/api/session', sessionLimiter, (req, res) => {
 });
 
 app.post('/api/heartbeat', requireToken, (req, res) => {
-    const banned = handleFlags(req.who, (req.body || {}).flags, 'heartbeat');
-    if (banned) return res.status(403).json({ ok: false, revoked: true });
+    const b = req.body || {};
+    const banned = handleFlags(req.who, b.flags, 'heartbeat');
+    if (banned) return res.status(403).json({
+        ok: false,
+        revoked: true,
+        message: 'This Scorp session was revoked after a blacklist or anti-tamper check triggered.',
+    });
     markUserActive(req.who);
     res.json({ ok: true });
 });

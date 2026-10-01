@@ -85,7 +85,6 @@ function TagEditor.Build(Window, Nametags)
     end
 
     local tab = Window:CreateTab("Free Name Tags", { Icon = "🏷️" })
-    local effectTab = Window:CreateTab("Tag Effects", { Icon = "✨" })
 
     do
         local sec = tab:CreateSection("Free Name Tags", true)
@@ -155,7 +154,7 @@ function TagEditor.Build(Window, Nametags)
     end
 
     do
-        local sec = effectTab:CreateSection("Effect Packs", true)
+        local sec = tab:CreateSection("Effect Packs", false)
         sec:AddLabel("Choose a ready-made animation pack. Each pack replaces the previous one, so effects won't stack or fight each other.", { Wrap = true })
         effectPreviewHolder = sec:AddCustom(110)
         local options = {}
