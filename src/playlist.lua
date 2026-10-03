@@ -18,7 +18,7 @@ local ACTIONS = {
 function Playlist.Build(Window, actions)
     actions = actions or {}
     local HttpService = game:GetService("HttpService")
-    local tab = Window:CreateTab("Playlist", { Icon = "♫", Group = "Studio" })
+    local tab = Window:CreateTab("Player List", { Icon = "♫", Group = "Studio" })
     local favoriteFile = "Scorp/playlist-favorites.json"
     local favorites = {}
     local category = "All"
@@ -55,7 +55,7 @@ function Playlist.Build(Window, actions)
     end
 
     local function notify(text, bad)
-        Window:Notify("Playlist", text, 3, bad and Window.Theme.Warning or Window.Theme.Success)
+        Window:Notify("Player List", text, 3, bad and Window.Theme.Warning or Window.Theme.Success)
     end
 
     local function visibleActions()

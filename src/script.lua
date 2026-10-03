@@ -255,7 +255,7 @@ do
     sec:AddButton("✨   Open Shader Studio", function()
         if ShaderEngine then ShaderEngine.Open() end
     end)
-    sec:AddButton("♫   Open Playlist", function()
+    sec:AddButton("  Open Playerlist", function()
         if PlaylistPlayer then PlaylistPlayer.Open() end
     end)
     sec:AddButton("♙   Open Player List", function()

@@ -315,7 +315,7 @@ function Shaders.Build(Window)
             end
         end
         if statsLabel then
-            statsLabel:Set(string.format("Preset: %s  ·  FPS: %d\nEnvironment: %s%s  ·  Neon hits: %d\nQuality: %s  ·  Scan: %d surfaces",
+            statsLabel:Set(string.format(
             "Preset: %s  ·  FPS: %d\nEnvironment: %s%s  ·  Neon hits: %d\nSurface: %s · focus %.0f studs\nQuality: %s%s · Scan: %d",
                 engine.Preset, math.floor(1000 / math.max(engine.Stats.frameMs, 1)),
                 engine.Stats.indoors and "Indoor" or "Outdoor", engine.Stats.water and " · Underwater" or "",

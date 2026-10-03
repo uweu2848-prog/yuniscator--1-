@@ -9,7 +9,7 @@ return function(H)
         if name == "Players" then out.hasPlayersTab = true end
         if name == "Free Name Tags" then out.hasFreeNameTagsTab = true end
         if name == "Shaders" then out.hasShadersTab = true end
-        if name == "Playlist" then out.hasPlaylistTab = true end
+        if name == "Player List" then out.hasPlaylistTab = true end
         if name == "About" then out.hasAboutTab = true end
         if name == "Settings" then out.hasSettingsTab = true end
         if name == "Player" or name == "Visuals" or name == "Misc" then out.hasPlaceholderTabs = true end
