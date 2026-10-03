@@ -29,6 +29,11 @@ local TagEditor = (function()
 --@include tageditor.lua
 end)()
 
+-- Yuniku-inspired local shader and post-processing engine.
+local Shaders = (function()
+--@include shaders.lua
+end)()
+
 -- Staff-panel code is fetched separately only after the server authorizes this session.
 local AdminPanel = nil
 local TagPanel = nil
@@ -43,24 +48,24 @@ local Scorp = libFn()
 assert(Scorp, "[Scorp] UI library ran but returned nothing.")
 ctx.lib = nil -- don't keep the library source sitting in the shared table
 
-local function stub(name)
-    return function(value)
-        print(("[Scorp] %s -> %s"):format(name, tostring(value)))
-    end
-end
-
 -- ───────────────────────────────────────────────────────────────────────────
 --  Window
 -- ───────────────────────────────────────────────────────────────────────────
 local Window = Scorp:CreateWindow({
-    Title        = "Scorp",
-    Subtitle     = "A Out Of Space Experience  ·  v0.1",
-    Theme        = "Sharp Silver",
+    Title        = "SCORP",
+    Subtitle     = "IDENTITY  ·  VISUALS  ·  COMMUNITY",
+    Theme        = "Aurora Glass",
+    Size         = UDim2.fromOffset(1000, 660),
+    MinSize      = Vector2.new(820, 540),
+    MaxSize      = Vector2.new(1320, 900),
     ToggleKey    = Enum.KeyCode.RightShift,
     UnloadKey    = Enum.KeyCode.Delete,
-    WidgetText   = "Scorp",
+    WidgetText   = "SCORP",
     ConfigFolder = "Scorp",
-    Starfield    = false,
+    Starfield    = true,
+    StarCount    = 38,
+    Nebula       = true,
+    BlurSize     = 8,
 })
 assert(type(Window) == "table" and type(Window.CreateTab) == "function",
     "[Scorp] incompatible UI library: Window:CreateTab is missing. Deploy/restart the server with src/ScorpLib.lua.")
@@ -153,106 +158,127 @@ end
 Window:SetWatermark(('<font color="rgb(168,186,214)">Scorp</font>  ·  %s %s'):format(
     tostring(ctx.releaseChannel or "production"), tostring(ctx.releaseVersion or ctx.build or "unversioned")))
 
-local Editor = TagEditor.Build(Window, Nametags)
 local StaffPanel = staffAuthorized and AdminPanel and AdminPanel.Build(Window, ctx) or nil
 local TagManagerPanel = (tagManagerAuthorized and not staffAuthorized and TagPanel) and TagPanel.Build(Window, ctx) or nil
 local SupportStaffPanel = (supportAuthorized and not staffAuthorized and not tagManagerAuthorized and SupportPanel) and SupportPanel.Build(Window, ctx) or nil
+local Editor = nil
+local ShaderEngine = nil
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Home
 -- ───────────────────────────────────────────────────────────────────────────
-local Home = Window:CreateTab("Home", { Icon = "🏄" })
+local Home = Window:CreateTab("Home", { Icon = "✦", Group = "Workspace" })
 
 do
-    local sec = Home:CreateSection("Welcome", true)
-    sec:AddLabel("Scorp is running. Everything here is a placeholder.", { Wrap = true })
-    sec:AddLabel("Made by YOUR_NAME", { Color = Window.Theme.TextDim })
-    sec:AddButton("Test Notification", function()
-        Window:Notify("Scorp", "Notifications are working.", 3)
+    local hero = Home:CreateSection("SCORP SPACE", true)
+    local card = hero:AddCustom(142)
+    card.BackgroundColor3 = Window.Theme.ToggleOff
+    card.BackgroundTransparency = 0.12
+    card.BorderSizePixel = 0
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 16)
+    corner.Parent = card
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.22
+    stroke.Color = Window.Theme.AccentLight
+    stroke.Parent = card
+    local gradient = Instance.new("UIGradient")
+    gradient.Rotation = 16
+    gradient.Color = ColorSequence.new(Window.Theme.Accent, Window.Theme.AccentLight)
+    gradient.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.88), NumberSequenceKeypoint.new(1, 0.97) })
+    gradient.Parent = card
+
+    local eyebrow = Instance.new("TextLabel")
+    eyebrow.BackgroundTransparency = 1
+    eyebrow.Position = UDim2.fromOffset(20, 15)
+    eyebrow.Size = UDim2.new(1, -40, 0, 18)
+    eyebrow.Font = Enum.Font.GothamBold
+    eyebrow.Text = "✦   YOUR COMMUNITY CLIENT"
+    eyebrow.TextColor3 = Window.Theme.AccentLight
+    eyebrow.TextSize = 11
+    eyebrow.TextXAlignment = Enum.TextXAlignment.Left
+    eyebrow.Parent = card
+
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.fromOffset(18, 38)
+    title.Size = UDim2.new(1, -36, 0, 37)
+    title.Font = Enum.Font.GothamBlack
+    title.Text = "MAKE SCORP YOURS"
+    title.TextColor3 = Window.Theme.TextWhite
+    title.TextSize = 25
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = card
+
+    local description = Instance.new("TextLabel")
+    description.BackgroundTransparency = 1
+    description.Position = UDim2.fromOffset(20, 80)
+    description.Size = UDim2.new(1, -40, 0, 42)
+    description.Font = Enum.Font.Gotham
+    description.Text = "Personalize your identity, tune your visuals, and explore the Scorp community."
+    description.TextColor3 = Window.Theme.TextDim
+    description.TextSize = 13
+    description.TextWrapped = true
+    description.TextXAlignment = Enum.TextXAlignment.Left
+    description.Parent = card
+
+    Window:_bind(function(theme)
+        card.BackgroundColor3 = theme.ToggleOff
+        stroke.Color = theme.AccentLight
+        gradient.Color = ColorSequence.new(theme.Accent, theme.AccentLight)
+        eyebrow.TextColor3 = theme.AccentLight
+        title.TextColor3 = theme.TextWhite
+        description.TextColor3 = theme.TextDim
     end)
-    sec:AddButton("Success Notification", function()
-        Window:Notify("Done", "This one uses the success colour.", 3, Window.Theme.Success)
+end
+
+do
+    local sec = Home:CreateSection("QUICK ACCESS", true)
+    sec:AddLabel("Jump straight into your most-used Scorp tools.", { Wrap = true, Color = Window.Theme.TextDim })
+    sec:AddButton("🏷️   Open Name Tag Studio", function()
+        if Editor then Editor.Open() end
     end)
+    sec:AddButton("✨   Open Shader Studio", function()
+        if ShaderEngine then ShaderEngine.Open() end
+    end)
+    if StaffPanel then
+        sec:AddButton("⚑   Open Staff Console", function() StaffPanel.Open() end)
+    elseif TagManagerPanel then
+        sec:AddButton("✦   Open Tag Studio · Staff", function() TagManagerPanel.Open() end)
+    elseif SupportStaffPanel then
+        sec:AddButton("◈   Open Support Desk", function() SupportStaffPanel.Open() end)
+    end
 end
 
 do
-    local sec = Home:CreateSection("Cosmic Core", true)
-    sec:AddToggle("Placeholder Feature 1", { Flag = "core_1", Callback = stub("Placeholder Feature 1") })
-    sec:AddToggle("Placeholder Feature 2", { Bindable = false, Flag = "core_2", Callback = stub("Placeholder Feature 2") })
-    sec:AddToggle("Placeholder Feature 3", { Bindable = false, Flag = "core_3", Callback = stub("Placeholder Feature 3") })
-    sec:AddSlider("Power Level", {
-        Min = 0, Max = 100, Default = 50, Increment = 1, Suffix = "%",
-        Flag = "core_power", Callback = stub("Power Level"),
-    })
-    sec:AddDropdown("Mode:", {
-        Options = { "Mode A", "Mode B", "Mode C" }, Default = "Mode A",
-        Flag = "core_mode", Callback = stub("Mode"),
-    })
+    local sec = Home:CreateSection("SESSION OVERVIEW", false)
+    local summary = sec:AddLabel("SCORP ONLINE\nLoading client details…", { Wrap = true, TextSize = 12, Color = Window.Theme.TextWhite })
+    local function refreshSummary()
+        local place = tostring(game.PlaceId or "Unknown")
+        local playerCount = #Players:GetPlayers()
+        summary:Set(("SCORP ONLINE  ·  %s\nWelcome, %s  ·  %d players in this server\nPlace ID  %s  ·  Build  %s"):format(
+            tostring(ctx.releaseChannel or "production"):upper(), tostring(LocalPlayer.DisplayName or LocalPlayer.Name),
+            playerCount, place, tostring(ctx.releaseVersion or ctx.build or "local")))
+    end
+    refreshSummary()
+    sec:AddButton("↻   Refresh Session Overview", refreshSummary)
 end
 
--- ───────────────────────────────────────────────────────────────────────────
---  Player
--- ───────────────────────────────────────────────────────────────────────────
-local Player = Window:CreateTab("Player", { Icon = "🌠" })
-
-do
-    local sec = Player:CreateSection("Movement", true)
-    sec:AddToggle("Movement Toggle 1", { Bindable = false, Flag = "move_1", Callback = stub("Movement Toggle 1") })
-    sec:AddToggle("Movement Toggle 2", { Bindable = false, Flag = "move_2", Callback = stub("Movement Toggle 2") })
-    sec:AddSlider("Value Slider 1", { Min = 0, Max = 100, Default = 16, Flag = "move_v1", Callback = stub("Value Slider 1") })
-    sec:AddSlider("Value Slider 2", { Min = 0, Max = 200, Default = 50, Flag = "move_v2", Callback = stub("Value Slider 2") })
-end
-
-do
-    local sec = Player:CreateSection("Character", false)
-    sec:AddToggle("Character Toggle", { Bindable = false, Flag = "char_1", Callback = stub("Character Toggle") })
-    sec:AddButton("Character Button", stub("Character Button"))
-    sec:AddKeybind("Character Keybind", { Default = Enum.KeyCode.F, Flag = "char_key", Callback = stub("Character Keybind") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Visuals
--- ───────────────────────────────────────────────────────────────────────────
-local Visuals = Window:CreateTab("Visuals", { Icon = "🌈" })
-
-do
-    local sec = Visuals:CreateSection("Glow", true)
-    sec:AddToggle("Enable Glow", { Bindable = false, Flag = "vis_glow", Callback = stub("Enable Glow") })
-    sec:AddColorPicker("Glow Color", {
-        Default = Color3.fromRGB(90, 210, 255), Flag = "vis_glow_color", Callback = stub("Glow Color"),
-    })
-    sec:AddSlider("Glow Strength", { Min = 0, Max = 100, Default = 40, Suffix = "%", Flag = "vis_glow_str", Callback = stub("Glow Strength") })
-end
-
-do
-    local sec = Visuals:CreateSection("Overlay", false)
-    sec:AddToggle("Overlay Toggle 1", { Bindable = false, Flag = "vis_o1", Callback = stub("Overlay Toggle 1") })
-    sec:AddToggle("Overlay Toggle 2", { Bindable = false, Flag = "vis_o2", Callback = stub("Overlay Toggle 2") })
-    sec:AddDropdown("Style:", { Options = { "Style 1", "Style 2", "Style 3" }, Default = "Style 1", Flag = "vis_style", Callback = stub("Style") })
-end
-
--- ───────────────────────────────────────────────────────────────────────────
---  Misc
--- ───────────────────────────────────────────────────────────────────────────
-local Misc = Window:CreateTab("Misc", { Icon = "🌌" })
-
-do
-    local sec = Misc:CreateSection("Utilities", true)
-    sec:AddButton("Utility Button 1", stub("Utility Button 1"))
-    sec:AddButton("Utility Button 2", stub("Utility Button 2"))
-    sec:AddTextbox("Input", { Placeholder = "type something...", Flag = "misc_input", Callback = stub("Input") })
-end
+-- Keep navigation focused on real, supported features rather than demo tabs.
+Editor = TagEditor.Build(Window, Nametags)
+ShaderEngine = Shaders.Build(Window)
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Settings
 -- ───────────────────────────────────────────────────────────────────────────
-local Settings = Window:CreateTab("Settings", { Icon = "⚙️" })
+local Settings = Window:CreateTab("Settings", { Icon = "⚙️", Group = "Preferences" })
 
-Window:AddThemeControls(Settings, "🎨 Theme")
-Window:AddConfigControls(Settings, "💾 Configs")
+Window:AddThemeControls(Settings, "01 · Appearance")
+Window:AddConfigControls(Settings, "02 · Configurations")
 
 do
-    local sec = Settings:CreateSection("Menu", true)
+    local sec = Settings:CreateSection("03 · Controls", true)
     local menuToggle = sec:AddKeybind("Menu Toggle Key", {
         Default  = Window.ToggleKey,
         Flag = "menu_toggle_key",
@@ -272,7 +298,7 @@ end
 --  Nametag settings
 -- ───────────────────────────────────────────────────────────────────────────
 do
-    local sec = Settings:CreateSection("Nametag Display", true)
+    local sec = Settings:CreateSection("04 · Nametag Display", true)
     sec:AddToggle("Show Nametags", { Default = true, Bindable = false, Flag = "tags_on",
         Callback = function(v) Nametags.Set("Enabled", v) end })
     sec:AddToggle("Show My Own Tag", { Default = true, Bindable = false, Flag = "tags_self",
@@ -305,6 +331,19 @@ do
     end
 end
 
+local InfoBar = Window:CreateInfoBar({
+    OnSettings = function()
+        Window:Toggle(true)
+        Window:SelectTab(Settings)
+    end,
+    OnGlobe = function()
+        if ShaderEngine then ShaderEngine.Open() end
+    end,
+    OnNametag = function()
+        if Editor then Editor.Open() end
+    end,
+})
+
 -- ───────────────────────────────────────────────────────────────────────────
 --  Session hooks + cleanup
 -- ───────────────────────────────────────────────────────────────────────────
@@ -313,6 +352,7 @@ ctx.revoke = function(message, updateRequired)
     local reason = tostring(message or (updateRequired and "Scorp was updated. Relaunch the latest loader to continue." or "Your Scorp session was revoked."))
     if updateRequired then
         pcall(Editor.Destroy)
+        pcall(ShaderEngine.Destroy)
         if StaffPanel then pcall(StaffPanel.Destroy) end
         if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
         if SupportStaffPanel then pcall(SupportStaffPanel.Destroy) end
@@ -383,6 +423,7 @@ end
 Window:OnUnload(function()
     print("[Scorp] unloaded")
     pcall(Editor.Destroy)
+    pcall(ShaderEngine.Destroy)
     if StaffPanel then pcall(StaffPanel.Destroy) end
     if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
     if SupportStaffPanel then pcall(SupportStaffPanel.Destroy) end

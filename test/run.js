@@ -677,7 +677,8 @@ async function testLua(d, S) {
     const glitchCode = ed && tagconfig.decodeCode(ed.glitchCode);
     ok(glitchTag && glitchCode && glitchTag.titleFont === 'Font.Michroma' && glitchCode.overrides.glitch === true && glitchCode.overrides.textAnimation === 'shimmer', 'glitch effect pack switches cleanly from rainbow while keeping the chosen font', glitchCode);
     ok(ed && ed.afterReset && ed.afterReset.title === 'Member' && ed.resetFontStyle === 'Classic' && ed.resetEffectPack === 'Classic Glow', 'reset restores the default preview and free preset selections');
-    ok(ed && ed.hasFreeNameTagsTab && ed.hasTagEffectsTab && !ed.hasFreeNameTagsShortcutInSettings, 'Free Name Tags and Tag Effects are separate main sidebar tabs');
+    ok(ed && ed.hasHomeTab && ed.hasFreeNameTagsTab && ed.hasShadersTab && ed.hasSettingsTab && !ed.hasPlaceholderTabs && ed.tabOrder === 'Home > Free Name Tags > Shaders > Settings', 'navigation contains the organized Home, Name Tags, Shaders and Settings tabs in order');
+    ok(ed && ed.hasDashboardActions && ed.hasShaderProfiles, 'dashboard has direct studio shortcuts and the shader tab has all profiles and a restore control');
     ok(ed && !ed.hasStaffPanelButton && ed.toggleKeyHasConfigFlag, 'non-admin payload omits the staff button and registers the menu key for persistence');
     // The exported free preset code can be applied by the existing server/staff flow.
     const luaImport = await fetch(`${S.base}/api/admin/tags/6010/import`, { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ code: ed.glitchCode }) });

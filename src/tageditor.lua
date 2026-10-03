@@ -84,7 +84,7 @@ function TagEditor.Build(Window, Nametags)
         rebuildPreview()
     end
 
-    local tab = Window:CreateTab("Free Name Tags", { Icon = "🏷️" })
+    local tab = Window:CreateTab("Free Name Tags", { Icon = "🏷️", Group = "Studio" })
 
     do
         local sec = tab:CreateSection("Free Name Tags", true)

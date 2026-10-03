@@ -63,6 +63,9 @@ local BASE = {
 -- Accent      = main chrome colour (borders, sliders, toggles)
 -- AccentLight = the "Power Cosmic" glow that trails the chrome sheen
 Library.Themes = {
+    ["Aurora Glass"] = { Accent = Color3.fromRGB(126, 104, 255), AccentLight = Color3.fromRGB(74, 226, 255),
+                         MainBg = Color3.fromRGB(10, 12, 27), SidebarBg = Color3.fromRGB(7, 9, 22), ToggleOff = Color3.fromRGB(20, 24, 48),
+                         TextWhite = Color3.fromRGB(242, 246, 255), TextDim = Color3.fromRGB(154, 166, 195) },
     -- Default: Cosmic Void — deep purple + electric cyan
     ["Cosmic Void"]   = { Accent = Color3.fromRGB(130, 60, 255),  AccentLight = Color3.fromRGB(0, 210, 255),
                           MainBg = Color3.fromRGB(6, 5, 16), SidebarBg = Color3.fromRGB(4, 3, 11), ToggleOff = Color3.fromRGB(18, 14, 40) },
@@ -77,7 +80,7 @@ Library.Themes = {
     ["Silver Surfer"] = { Accent = Color3.fromRGB(160, 180, 220), AccentLight = Color3.fromRGB(80, 210, 255),
                           MainBg = Color3.fromRGB(8, 9, 20), SidebarBg = Color3.fromRGB(5, 6, 14), ToggleOff = Color3.fromRGB(18, 22, 44) },
 }
-Library.ThemeOrder = { "Cosmic Void", "Nova Pulse", "Nebula Blue", "Solar Flare", "Void Emerald", "Silver Surfer" }
+Library.ThemeOrder = { "Aurora Glass", "Cosmic Void", "Nova Pulse", "Nebula Blue", "Solar Flare", "Void Emerald", "Silver Surfer" }
 
 --- Add your own preset: Library:RegisterTheme("Sunset", { Accent = Color3.fromRGB(255,120,40) })
 function Library:RegisterTheme(name, preset)
@@ -575,7 +578,7 @@ function Library:CreateWindow(opts)
     end
 
     -- ── Sidebar ──
-    self.Sidebar = Make("Frame", { Parent = self.Main, Size = UDim2.new(0, 190, 1, 0), BackgroundTransparency = 0.2, BorderSizePixel = 0 })
+    self.Sidebar = Make("Frame", { Parent = self.Main, Size = UDim2.new(0, 208, 1, 0), BackgroundTransparency = 0.12, BorderSizePixel = 0 })
     self:_bind(function(t) self.Sidebar.BackgroundColor3 = t.SidebarBg end)
     if not self.Flat then
         Make("UIGradient", { Parent = self.Sidebar, Rotation = 90, Color = ColorSequence.new({
@@ -677,6 +680,13 @@ function Library:CreateWindow(opts)
         for _, t in ipairs(self._tabs) do
             t._btn.Visible = (q == "") or (t.Name:lower():find(q, 1, true) ~= nil)
         end
+        for _, group in ipairs(self._tabGroups or {}) do
+            local hasMatch = false
+            for _, t in ipairs(self._tabs) do
+                if t.Group == group.Name and t._btn.Visible then hasMatch = true; break end
+            end
+            group.Label.Visible = (q == "") or hasMatch
+        end
     end)
 
     self._tabTop = searchY + 40
@@ -702,17 +712,22 @@ function Library:CreateWindow(opts)
     })
 
     -- ── Content area ──
-    self.Content = Make("Frame", { Parent = self.Main, Size = UDim2.new(1, -190, 1, 0), Position = UDim2.new(0, 190, 0, 0), BackgroundTransparency = 1 })
-    local topStrip = Make("Frame", { Parent = self.Content, Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1, Active = true })
+    self.Content = Make("Frame", { Parent = self.Main, Size = UDim2.new(1, -208, 1, 0), Position = UDim2.new(0, 208, 0, 0), BackgroundTransparency = 1 })
+    local topStrip = Make("Frame", { Parent = self.Content, Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1, Active = true })
     self._hint = Make("TextLabel", {
-        Parent = topStrip, Size = UDim2.new(1, -20, 1, 0), Position = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 1,
+        Parent = topStrip, Size = UDim2.new(1, -24, 1, 0), Position = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 1,
         TextColor3 = self.Theme.TextDim, Font = Enum.Font.Montserrat, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right,
     })
     self._pageTitle = Make("TextLabel", {
-        Parent = topStrip, Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, 26, 0, 0), BackgroundTransparency = 1,
-        Text = "", TextColor3 = self.Theme.TextWhite, Font = Enum.Font.GothamBlack, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = topStrip, Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, 24, 0, 0), BackgroundTransparency = 1,
+        Text = "", TextColor3 = self.Theme.TextWhite, Font = Enum.Font.GothamBlack, TextSize = 18, TextXAlignment = Enum.TextXAlignment.Left,
     })
-    self._pages = Make("Frame", { Parent = self.Content, Size = UDim2.new(1, 0, 1, -40), Position = UDim2.new(0, 0, 0, 40), BackgroundTransparency = 1 })
+    local titleAccent = Make("Frame", { Parent = topStrip, Size = UDim2.fromOffset(3, 22), Position = UDim2.new(0, 12, 0.5, -11), BorderSizePixel = 0 })
+    Corner(titleAccent, 2)
+    self:_bind(function(t) titleAccent.BackgroundColor3 = t.AccentLight end)
+    local headerDivider = Make("Frame", { Parent = self.Content, Size = UDim2.new(1, -44, 0, 1), Position = UDim2.new(0, 22, 0, 51), BorderSizePixel = 0, BackgroundTransparency = 0.72 })
+    self:_bind(function(t) headerDivider.BackgroundColor3 = t.Accent end)
+    self._pages = Make("Frame", { Parent = self.Content, Size = UDim2.new(1, 0, 1, -52), Position = UDim2.new(0, 0, 0, 52), BackgroundTransparency = 1 })
 
     self:_drag(logoArea, self.Main)
     self:_drag(topStrip, self.Main)
@@ -1132,14 +1147,31 @@ end
 --- opts: { Icon = "🏠", Default = true }
 function Window:CreateTab(name, opts)
     opts = opts or {}
-    local tab = setmetatable({ Window = self, Name = name }, Tab)
-    local label = "      " .. (opts.Icon and (opts.Icon .. "  ") or "") .. name
+    local tab = setmetatable({ Window = self, Name = name, Group = opts.Group }, Tab)
+    local label = "       " .. (opts.Icon and (opts.Icon .. "   ") or "") .. name
     local isDefault = opts.Default or (#self._tabs == 0)
 
-    local btn = Make("TextButton", { Parent = self._tabList, Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, Text = "", AutoButtonColor = false })
-    local pill = Make("Frame", { Parent = btn, Size = UDim2.new(1, -20, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 0.86, BorderSizePixel = 0, Visible = false })
-    Corner(pill, 8)
-    self:_stroke(pill, 1, 0.55)
+    if opts.Group and opts.Group ~= self._lastTabGroup then
+        self._tabGroups = self._tabGroups or {}
+        self._navOrder = (self._navOrder or 0) + 1
+        local groupLabel = Make("TextLabel", {
+            Parent = self._tabList, Size = UDim2.new(1, -28, 0, 19),
+            BackgroundTransparency = 1, Text = string.upper(opts.Group),
+            TextColor3 = self.Theme.TextDim, Font = Enum.Font.GothamBold,
+            TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
+            LayoutOrder = self._navOrder,
+        })
+        Make("UIPadding", { Parent = groupLabel, PaddingLeft = UDim.new(0, 18) })
+        self._bind(function(t) groupLabel.TextColor3 = t.TextDim end)
+        self._tabGroups[#self._tabGroups + 1] = { Name = opts.Group, Label = groupLabel }
+    end
+    self._lastTabGroup = opts.Group
+
+    self._navOrder = (self._navOrder or 0) + 1
+    local btn = Make("TextButton", { Parent = self._tabList, LayoutOrder = self._navOrder, Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1, Text = "", AutoButtonColor = false })
+    local pill = Make("Frame", { Parent = btn, Size = UDim2.new(1, -18, 1, -2), Position = UDim2.new(0, 9, 0, 1), BackgroundTransparency = 1, BorderSizePixel = 0, Visible = false })
+    Corner(pill, 10)
+    self:_stroke(pill, 1, 0.72)
     self:_bind(function(t) pill.BackgroundColor3 = t.Accent end)
     local bgText = Make("TextLabel", {
         Parent = btn, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = label, TextColor3 = Color3.new(1, 1, 1),
@@ -1213,13 +1245,15 @@ end
 function Tab:CreateSection(title, expanded)
     local win = self.Window
     expanded = expanded ~= false
-    local SH = 32
+    local SH = 38
 
-    local wrapper = Make("Frame", { Parent = self.Page, Size = UDim2.new(1, 0, 0, SH), BackgroundTransparency = 1, ClipsDescendants = true })
-    local header = Make("TextButton", { Parent = wrapper, Size = UDim2.new(1, 0, 0, SH), BackgroundTransparency = 0.3, Text = "", AutoButtonColor = false })
-    win:_bind(function(t) header.BackgroundColor3 = t.ToggleOff end)
-    Corner(header, 6)
-    win:_stroke(header, 1, 0.5)
+    local wrapper = Make("Frame", { Parent = self.Page, Size = UDim2.new(1, 0, 0, SH), BackgroundTransparency = 0.52, ClipsDescendants = true })
+    win:_bind(function(t) wrapper.BackgroundColor3 = t.ToggleOff end)
+    Corner(wrapper, 12)
+    win:_stroke(wrapper, 1, 0.82)
+    local header = Make("TextButton", { Parent = wrapper, Size = UDim2.new(1, 0, 0, SH), BackgroundTransparency = 0.78, Text = "", AutoButtonColor = false })
+    win:_bind(function(t) header.BackgroundColor3 = t.Accent end)
+    Corner(header, 12)
     if not win.Flat then
         Make("UIGradient", { Parent = header, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.6) }) })
         win:_cometMark(header, 9, Vector2.new(0, 0.5), UDim2.new(0, 8, 0.5, 0))
@@ -1236,13 +1270,13 @@ function Tab:CreateSection(title, expanded)
     })
     win:_bind(function(t) arrow.TextColor3 = t.Accent end)
 
-    local content = Make("Frame", { Parent = wrapper, Size = UDim2.new(1, 0, 0, 0), Position = UDim2.new(0, 0, 0, SH + 6), BackgroundTransparency = 1, ClipsDescendants = true })
-    local layout = Make("UIListLayout", { Parent = content, Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder })
-    Make("UIPadding", { Parent = content, PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 2) })
+    local content = Make("Frame", { Parent = wrapper, Size = UDim2.new(1, 0, 0, 0), Position = UDim2.new(0, 0, 0, SH + 4), BackgroundTransparency = 1, ClipsDescendants = true })
+    local layout = Make("UIListLayout", { Parent = content, Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder })
+    Make("UIPadding", { Parent = content, PaddingLeft = UDim.new(0, 11), PaddingRight = UDim.new(0, 11), PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 7) })
 
     local function resize(animate)
-        local ch = layout.AbsoluteContentSize.Y + 4
-        local wh = expanded and (SH + 6 + ch) or SH
+        local ch = layout.AbsoluteContentSize.Y + 12
+        local wh = expanded and (SH + 4 + ch) or SH
         local cH = expanded and ch or 0
         local rot = expanded and 90 or 0
         if animate then
