@@ -47,11 +47,17 @@ return function(H)
         and H.controls["✨   Open Shader Studio"] ~= nil
         and H.controls["♫   Open Playlist"] ~= nil
         and H.controls["♙   Open Player List"] ~= nil
-    out.hasPlaylistControls = H.controls["Audio asset ID"] ~= nil
-        and H.controls["＋   Add Track"] ~= nil
-        and H.controls["▶   Play / Resume"] ~= nil
-        and H.controls["◀   Previous Track"] ~= nil
-        and H.controls["▶   Next Track"] ~= nil
+    local playlistFrame, playlistSearch
+    for _, frame in ipairs(H.customFrames) do
+        if H.find(frame, "ActionPlaylist") then playlistFrame = H.find(frame, "ActionPlaylist") end
+        if H.find(frame, "PlaylistSearch") then playlistSearch = H.find(frame, "PlaylistSearch") end
+    end
+    out.hasPlaylistActions = H.controls.Category ~= nil
+        and playlistFrame ~= nil
+        and playlistSearch ~= nil
+        and H.find(playlistFrame, "ActionRow_name-tags") ~= nil
+        and H.find(playlistFrame, "Favorite") ~= nil
+        and H.controls["Audio asset ID"] == nil
 
     ctl("Color Theme:").Callback("Cyber Blue")
     ctl("Font Style:").Callback("Sci-Fi")

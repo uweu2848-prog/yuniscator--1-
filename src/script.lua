@@ -174,6 +174,8 @@ local Editor = nil
 local ShaderEngine = nil
 local Roster = nil
 local PlaylistPlayer = nil
+local Settings = nil
+local About = nil
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Home
@@ -259,9 +261,6 @@ do
     sec:AddButton("♙   Open Player List", function()
         if Roster then Roster.Open() end
     end)
-    sec:AddButton("♫   Open Playlist", function()
-        if PlaylistPlayer then PlaylistPlayer.Open() end
-    end)
     if StaffPanel then
         sec:AddButton("⚑   Open Staff Console", function() StaffPanel.Open() end)
     elseif TagManagerPanel then
@@ -291,10 +290,24 @@ end
 Roster = PlayerRoster.Build(Window, Players, LocalPlayer)
 Editor = TagEditor.Build(Window, Nametags)
 ShaderEngine = Shaders.Build(Window)
-PlaylistPlayer = Playlist.Build(Window)
+PlaylistPlayer = Playlist.Build(Window, {
+    ["name-tags"] = function() Editor.Open() end,
+    shaders = function() ShaderEngine.Open() end,
+    ["shader-stop"] = function() ShaderEngine.Stop() end,
+    players = function() Roster.Open() end,
+    ["refresh-tags"] = function() Nametags.Refresh() end,
+    ["preview-vip"] = function() Nametags.Preview("vip") end,
+    ["clear-preview"] = function() Nametags.Preview(nil) end,
+    settings = function()
+        if Settings then Window:Toggle(true); Window:SelectTab(Settings) end
+    end,
+    about = function()
+        if About then Window:Toggle(true); Window:SelectTab(About) end
+    end,
+})
 
 do
-    local About = Window:CreateTab("About", { Icon = "ⓘ", Group = "About" })
+    About = Window:CreateTab("About", { Icon = "ⓘ", Group = "About" })
     local section = About:CreateSection("ABOUT SCORP", true)
     section:AddLabel("SCORP · Identity / Visuals / Community", { Wrap = true, TextSize = 15, Color = Window.Theme.AccentLight })
     section:AddLabel("A community client for player identity, local visual customization, and server-aware nametags.", { Wrap = true, Color = Window.Theme.TextWhite })
@@ -313,7 +326,7 @@ end
 -- ───────────────────────────────────────────────────────────────────────────
 --  Settings
 -- ───────────────────────────────────────────────────────────────────────────
-local Settings = Window:CreateTab("Settings", { Icon = "⚙️", Group = "Preferences" })
+Settings = Window:CreateTab("Settings", { Icon = "⚙️", Group = "Preferences" })
 
 Window:AddThemeControls(Settings, "01 · Appearance")
 Window:AddConfigControls(Settings, "02 · Configurations")
