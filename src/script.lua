@@ -251,11 +251,11 @@ do
     sec:AddLabel("Jump straight into your most-used Scorp tools.", { Wrap = true, Color = Window.Theme.TextDim })
     sec:AddButton("🏷️   Open Name Tag Studio", function()
         if Editor then Editor.Open() end
-    end)
+    end)S
     sec:AddButton("✨   Open Shader Studio", function()
         if ShaderEngine then ShaderEngine.Open() end
     end)
-    sec:AddButton("  Open Playerlist", function()
+    sec:AddButton("   Open Quick Actions", function()
         if PlaylistPlayer then PlaylistPlayer.Open() end
     end)
     sec:AddButton("♙   Open Player List", function()
