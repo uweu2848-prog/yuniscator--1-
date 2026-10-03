@@ -680,7 +680,7 @@ async function testLua(d, S) {
     ok(ed && ed.hasHomeTab && ed.hasFreeNameTagsTab && ed.hasShadersTab && ed.hasSettingsTab && !ed.hasPlaceholderTabs && ed.tabOrder === 'Home > Free Name Tags > Shaders > Settings', 'navigation contains the organized Home, Name Tags, Shaders and Settings tabs in order');
     ok(ed && ed.hasDashboardActions && ed.hasShaderProfiles, 'dashboard has direct studio shortcuts and the shader tab has all profiles and a restore control');
     ok(ed && ed.tabGroups.Home === 'Workspace' && ed.tabGroups['Free Name Tags'] === 'Studio' && ed.tabGroups.Shaders === 'Studio' && ed.tabGroups.Settings === 'Preferences', 'sidebar groups destinations into Workspace, Studio, and Preferences');
-    ok(ed && ed.hasInfoBarShortcuts, 'persistent info bar exposes working settings, shader, and nametag shortcuts');
+    ok(ed && ed.hasInfoBarShortcuts && ed.infoBarIdentity, 'persistent Yuniku-inspired status dock has brand/channel identity and settings, shader, nametag, and community shortcuts');
     ok(ed && !ed.hasStaffPanelButton && ed.toggleKeyHasConfigFlag, 'non-admin payload omits the staff button and registers the menu key for persistence');
     // The exported free preset code can be applied by the existing server/staff flow.
     const luaImport = await fetch(`${S.base}/api/admin/tags/6010/import`, { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ code: ed.glitchCode }) });

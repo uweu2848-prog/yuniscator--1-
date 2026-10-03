@@ -2016,12 +2016,15 @@ function Window:CreateInfoBar(opts)
     local win = self
     local ok, Stats = pcall(function() return game:GetService("Stats") end)
     Stats = ok and Stats or nil
+    local targetPosition = opts.Position or UDim2.new(0.5, 0, 0, 16)
 
     local bar = Make("Frame", {
-        Name = "InfoBar", Parent = self.Gui, Size = UDim2.fromOffset(0, 52), AutomaticSize = Enum.AutomaticSize.X,
-        AnchorPoint = Vector2.new(0.5, 0), Position = opts.Position or UDim2.new(0.5, 0, 0, 16),
-        BackgroundColor3 = Color3.fromRGB(8, 6, 18), BackgroundTransparency = 0, BorderSizePixel = 0, ZIndex = 70,
+        Name = "InfoBar", Parent = self.Gui, Size = UDim2.fromOffset(0, 56), AutomaticSize = Enum.AutomaticSize.X,
+        AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(targetPosition.X.Scale, targetPosition.X.Offset, targetPosition.Y.Scale, targetPosition.Y.Offset - 14),
+        BackgroundColor3 = Color3.fromRGB(8, 6, 18), BackgroundTransparency = 0.08, BorderSizePixel = 0, ZIndex = 70,
     })
+    local barScale = Make("UIScale", { Parent = bar, Scale = 0.94 })
     Round(bar)
     local shade = Make("UIGradient", {
         Parent = bar, Rotation = 90,
@@ -2032,20 +2035,26 @@ function Window:CreateInfoBar(opts)
         Color = Color3.new(1, 1, 1), Transparency = 0.82,
     })
     local sheen = Make("Frame", {
-        Parent = bar, Size = UDim2.new(1, -72, 0, 1), Position = UDim2.new(0, 36, 0, 1),
-        BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.82, BorderSizePixel = 0, ZIndex = 72,
+        Parent = bar, Size = UDim2.new(1, -48, 0, 1), Position = UDim2.new(0, 24, 0, 1),
+        BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.72, BorderSizePixel = 0, ZIndex = 72,
     })
 
     local row = Make("Frame", {
-        Parent = bar, Size = UDim2.fromOffset(0, 52), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, ZIndex = 71,
+        Parent = bar, Size = UDim2.fromOffset(0, 56), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, ZIndex = 71,
     })
-    Make("UIPadding", { Parent = row, PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) })
+    Make("UIPadding", { Parent = row, PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) })
     Make("UIListLayout", {
         Parent = row, FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center,
-        Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder,
     })
 
     local order = 0
+    local infoConnections = {}
+    local function connectInfo(signal, callback)
+        local connection = signal:Connect(callback)
+        infoConnections[#infoConnections + 1] = connection
+        return connection
+    end
     local function nextOrder()
         order = order + 1
         return order
@@ -2053,8 +2062,8 @@ function Window:CreateInfoBar(opts)
 
     local function chip()
         local holder = Make("Frame", {
-            Parent = row, LayoutOrder = nextOrder(), Size = UDim2.fromOffset(0, 34), AutomaticSize = Enum.AutomaticSize.X,
-            BackgroundTransparency = 0.28, BorderSizePixel = 0, ZIndex = 71,
+            Parent = row, LayoutOrder = nextOrder(), Size = UDim2.fromOffset(0, 36), AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 0.18, BorderSizePixel = 0, ZIndex = 71,
         })
         Corner(holder, 10)
         Make("UIPadding", { Parent = holder, PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) })
@@ -2067,7 +2076,7 @@ function Window:CreateInfoBar(opts)
 
     local function readout(parent, width, layout)
         return Make("TextLabel", {
-            Parent = parent, LayoutOrder = layout, Size = UDim2.fromOffset(width, 34), BackgroundTransparency = 1,
+            Parent = parent, LayoutOrder = layout, Size = UDim2.fromOffset(width, 36), BackgroundTransparency = 1,
             Text = "—", TextColor3 = win.Theme.TextWhite, Font = Enum.Font.GothamBold, TextSize = 15,
             TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 72,
         })
@@ -2075,7 +2084,7 @@ function Window:CreateInfoBar(opts)
 
     local function unit(parent, text, layout)
         local label = Make("TextLabel", {
-            Parent = parent, LayoutOrder = layout, Size = UDim2.fromOffset(0, 34), AutomaticSize = Enum.AutomaticSize.X,
+            Parent = parent, LayoutOrder = layout, Size = UDim2.fromOffset(0, 36), AutomaticSize = Enum.AutomaticSize.X,
             BackgroundTransparency = 1, Text = text, Font = Enum.Font.Gotham, TextSize = 11, ZIndex = 72,
         })
         win:_bind(function(t) label.TextColor3 = t.TextDim end)
@@ -2091,10 +2100,37 @@ function Window:CreateInfoBar(opts)
         sheen.BackgroundColor3 = t.TextWhite or Color3.new(1, 1, 1)
     end)
 
+    -- Brand capsule and release channel make the always-on dock feel like part
+    -- of the client, while keeping the changing network numbers visually quiet.
+    local brandHolder = chip()
+    local brandDot = Make("Frame", {
+        Parent = brandHolder, LayoutOrder = 1, Size = UDim2.fromOffset(8, 8),
+        BackgroundColor3 = win.Theme.Success, BorderSizePixel = 0, ZIndex = 72,
+    })
+    Round(brandDot)
+    win:_bind(function(t) brandHolder.BackgroundColor3 = t.ToggleOff or t.SidebarBg end)
+    local brandText = Make("TextLabel", {
+        Parent = brandHolder, LayoutOrder = 2, Size = UDim2.fromOffset(58, 36),
+        BackgroundTransparency = 1, Text = opts.Brand or "SCORP", TextColor3 = win.Theme.TextWhite,
+        Font = Enum.Font.GothamBlack, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 72,
+    })
+    local channelText = Make("TextLabel", {
+        Parent = brandHolder, LayoutOrder = 3, Size = UDim2.fromOffset(0, 36), AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1, Text = string.upper(tostring(opts.Channel or "LIVE")),
+        TextColor3 = win.Theme.AccentLight, Font = Enum.Font.GothamBold, TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 72,
+    })
+    win:_bind(function(t)
+        brandText.TextColor3 = t.TextWhite
+        channelText.TextColor3 = t.AccentLight
+    end)
+
     -- Player count, with a floating +1 / -1 whenever someone joins or leaves.
     local countHolder = chip()
+    local countTitle = unit(countHolder, "PLAYERS", 1)
+    countTitle.LayoutOrder = 1
     local dot = Make("Frame", {
-        Parent = countHolder, LayoutOrder = 1, Size = UDim2.fromOffset(7, 7),
+        Parent = countHolder, LayoutOrder = 2, Size = UDim2.fromOffset(6, 6),
         BackgroundColor3 = win.Theme.AccentLight, BorderSizePixel = 0, ZIndex = 72,
     })
     Round(dot)
@@ -2102,7 +2138,7 @@ function Window:CreateInfoBar(opts)
         countHolder.BackgroundColor3 = t.ToggleOff or t.SidebarBg
         dot.BackgroundColor3 = t.AccentLight
     end)
-    local countLabel = readout(countHolder, 28, 2)
+    local countLabel = readout(countHolder, 24, 3)
     local function bump(delta)
         local color = delta > 0 and win.Theme.Success or win.Theme.Danger
         local origin = countHolder.AbsolutePosition - bar.AbsolutePosition
@@ -2117,8 +2153,8 @@ function Window:CreateInfoBar(opts)
     end
     local function refreshCount() countLabel.Text = tostring(#Players:GetPlayers()) end
     refreshCount()
-    win:_connect(Players.PlayerAdded, function() refreshCount(); bump(1) end)
-    win:_connect(Players.PlayerRemoving, function()
+    connectInfo(Players.PlayerAdded, function() refreshCount(); bump(1) end)
+    connectInfo(Players.PlayerRemoving, function()
         bump(-1)
         task.defer(refreshCount)
     end)
@@ -2140,13 +2176,25 @@ function Window:CreateInfoBar(opts)
         })
         Corner(pingBars[i], 1)
     end
-    local pingLabel = readout(pingHolder, 36, 2)
-    unit(pingHolder, "ms", 3)
+    local pingTitle = unit(pingHolder, "PING", 1)
+    pingTitle.LayoutOrder = 1
+    barsHost.LayoutOrder = 2
+    local pingLabel = readout(pingHolder, 31, 3)
+    unit(pingHolder, "ms", 4)
 
     local fpsHolder = chip()
     win:_bind(function(t) fpsHolder.BackgroundColor3 = t.ToggleOff or t.SidebarBg end)
-    local fpsLabel = readout(fpsHolder, 26, 1)
-    unit(fpsHolder, "fps", 2)
+    local fpsTitle = unit(fpsHolder, "FPS", 1)
+    fpsTitle.LayoutOrder = 1
+    local fpsLabel = readout(fpsHolder, 26, 2)
+
+    local timeHolder = chip()
+    win:_bind(function(t) timeHolder.BackgroundColor3 = t.ToggleOff or t.SidebarBg end)
+    local timeTitle = unit(timeHolder, "LOCAL", 1)
+    timeTitle.LayoutOrder = 1
+    local timeLabel = readout(timeHolder, 74, 2)
+    timeLabel.TextSize = 12
+    timeLabel.Font = Enum.Font.GothamMedium
 
     local function paintPing(ms)
         local lit, color = 1, win.Theme.Danger
@@ -2174,7 +2222,7 @@ function Window:CreateInfoBar(opts)
 
     do
         local frames, acc = 0, 0
-        win:_connect(RunService.RenderStepped, function(dt)
+        connectInfo(RunService.RenderStepped, function(dt)
             frames, acc = frames + 1, acc + dt
             if acc >= 0.5 then
                 local fps = math.floor(frames / acc + 0.5)
@@ -2185,6 +2233,7 @@ function Window:CreateInfoBar(opts)
         end)
         task.spawn(function()
             while bar.Parent do
+                timeLabel.Text = os.date("%I:%M:%S %p")
                 local pingOk, ping = false, nil
                 if Stats then
                     pingOk, ping = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
@@ -2207,6 +2256,27 @@ function Window:CreateInfoBar(opts)
         BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.78, BorderSizePixel = 0, ZIndex = 71,
     })
     win:_bind(function(t) divider.BackgroundColor3 = t.AccentLight or Color3.new(1, 1, 1) end)
+
+    local function fitBar()
+        local camera = workspace.CurrentCamera
+        local width = bar.AbsoluteSize.X / math.max(barScale.Scale, 0.01)
+        if camera and width > 0 then
+            barScale.Scale = math.min(1, math.max(0.62, (camera.ViewportSize.X - 24) / width))
+        end
+    end
+    local cameraViewportConnection
+    local function watchCamera()
+        if cameraViewportConnection then cameraViewportConnection:Disconnect() end
+        local camera = workspace.CurrentCamera
+        if camera then cameraViewportConnection = connectInfo(camera:GetPropertyChangedSignal("ViewportSize"), fitBar) end
+        fitBar()
+    end
+    connectInfo(bar:GetPropertyChangedSignal("AbsoluteSize"), fitBar)
+    connectInfo(workspace:GetPropertyChangedSignal("CurrentCamera"), watchCamera)
+    watchCamera()
+    task.defer(fitBar)
+    Tween(barScale, { Scale = math.min(1, barScale.Scale) }, 0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    Tween(bar, { Position = targetPosition }, 0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
     local function mark(parent, size, pos)
         return Make("Frame", {
@@ -2276,7 +2346,11 @@ function Window:CreateInfoBar(opts)
     end
 
     local api = { Frame = bar }
-    function api.Destroy() pcall(function() bar:Destroy() end) end
+    function api.Destroy()
+        for _, connection in ipairs(infoConnections) do pcall(function() connection:Disconnect() end) end
+        infoConnections = {}
+        pcall(function() bar:Destroy() end)
+    end
     return api
 end
 

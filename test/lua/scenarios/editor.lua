@@ -17,6 +17,9 @@ return function(H)
         and type(H.infoBarOptions.OnSettings) == "function"
         and type(H.infoBarOptions.OnGlobe) == "function"
         and type(H.infoBarOptions.OnNametag) == "function"
+        and type(H.infoBarOptions.OnDiscord) == "function"
+    out.infoBarIdentity = H.infoBarOptions and H.infoBarOptions.Brand == "SCORP"
+        and H.infoBarOptions.Channel == "PRODUCTION"
     out.hasStaffPanelButton = H.controls["Admin Panel · Staff"] ~= nil
     out.toggleKeyHasConfigFlag = H.controls["Menu Toggle Key"] and H.controls["Menu Toggle Key"].Flag == "menu_toggle_key"
     local function preview()

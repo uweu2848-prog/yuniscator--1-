@@ -332,6 +332,8 @@ do
 end
 
 local InfoBar = Window:CreateInfoBar({
+    Brand = "SCORP",
+    Channel = tostring(ctx.releaseChannel or "production"):upper(),
     OnSettings = function()
         Window:Toggle(true)
         Window:SelectTab(Settings)
@@ -341,6 +343,15 @@ local InfoBar = Window:CreateInfoBar({
     end,
     OnNametag = function()
         if Editor then Editor.Open() end
+    end,
+    OnDiscord = function()
+        local invite = "https://discord.gg/scorp"
+        local copy = setclipboard or toclipboard
+        if type(copy) == "function" and pcall(copy, invite) then
+            Window:Notify("Community Invite", "Discord invite copied to clipboard.", 3, Window.Theme.Success)
+        else
+            Window:Notify("Community Invite", invite, 5, Window.Theme.AccentLight)
+        end
     end,
 })
 
@@ -353,6 +364,7 @@ ctx.revoke = function(message, updateRequired)
     if updateRequired then
         pcall(Editor.Destroy)
         pcall(ShaderEngine.Destroy)
+        pcall(InfoBar.Destroy)
         if StaffPanel then pcall(StaffPanel.Destroy) end
         if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
         if SupportStaffPanel then pcall(SupportStaffPanel.Destroy) end
@@ -424,6 +436,7 @@ Window:OnUnload(function()
     print("[Scorp] unloaded")
     pcall(Editor.Destroy)
     pcall(ShaderEngine.Destroy)
+    pcall(InfoBar.Destroy)
     if StaffPanel then pcall(StaffPanel.Destroy) end
     if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
     if SupportStaffPanel then pcall(SupportStaffPanel.Destroy) end
