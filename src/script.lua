@@ -262,6 +262,8 @@ do
             playerCount, place, tostring(ctx.releaseVersion or ctx.build or "local")))
     end
     refreshSummary()
+    Window:_connect(Players.PlayerAdded, refreshSummary)
+    Window:_connect(Players.PlayerRemoving, function() task.defer(refreshSummary) end)
     sec:AddButton("↻   Refresh Session Overview", refreshSummary)
 end
 

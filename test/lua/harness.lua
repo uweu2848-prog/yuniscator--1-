@@ -94,6 +94,8 @@ Vector2 = { new = function(x, y) return { X = x, Y = y } end }
 Vector3 = { new = function(x, y, z) return { X = x, Y = y, Z = z } end }
 ColorSequenceKeypoint = { new = function(t, c) return { Time = t, Value = c } end }
 ColorSequence = { new = function(a, b) return { a, b } end }
+NumberSequenceKeypoint = { new = function(t, v) return { Time = t, Value = v } end }
+NumberSequence = { new = function(a, b) return { a, b } end }
 TweenInfo = { new = function(...) return { ... } end }
 Enum = setmetatable({}, { __index = function(_, cat)
     return setmetatable({}, { __index = function(_, item) return cat .. "." .. item end })
@@ -110,6 +112,25 @@ Random = { new = function() return {
 -- ───────────────────────────────────────────────────────────────────────────
 local Inst = {}
 local methods = {}
+local Signal = {}
+Signal.__index = Signal
+function Signal:Connect(callback)
+    local connection = { Connected = true }
+    function connection:Disconnect() self.Connected = false end
+    self.listeners[#self.listeners + 1] = { callback = callback, connection = connection }
+    return connection
+end
+function Signal:Fire(...)
+    for _, listener in ipairs(self.listeners) do
+        if listener.connection.Connected then listener.callback(...) end
+    end
+end
+local SIGNAL_NAMES = {
+    InputBegan = true, InputChanged = true, InputEnded = true, Changed = true,
+    MouseEnter = true, MouseLeave = true, MouseButton1Click = true,
+    MouseButton1Down = true, MouseButton1Up = true, Focused = true, FocusLost = true,
+    Activated = true, AncestryChanged = true,
+}
 local function setParent(inst, parent)
     local old = rawget(inst, "_parent")
     if old then
@@ -120,6 +141,12 @@ local function setParent(inst, parent)
 end
 Inst.__index = function(t, k)
     if k == "Parent" then return rawget(t, "_parent") end
+    if SIGNAL_NAMES[k] then
+        local signals = rawget(t, "_signals") or {}
+        rawset(t, "_signals", signals)
+        if not signals[k] then signals[k] = setmetatable({ listeners = {} }, Signal) end
+        return signals[k]
+    end
     return methods[k]
 end
 Inst.__newindex = function(t, k, v)
@@ -134,6 +161,13 @@ function methods.Destroy(self)
     for _, c in ipairs({ table.unpack(self._children) }) do c:Destroy() end
 end
 function methods.GetChildren(self) return { table.unpack(self._children) } end
+function methods.GetPropertyChangedSignal(self, property)
+    local signals = rawget(self, "_signals") or {}
+    rawset(self, "_signals", signals)
+    local key = "PropertyChanged_" .. tostring(property)
+    if not signals[key] then signals[key] = setmetatable({ listeners = {} }, Signal) end
+    return signals[key]
+end
 function methods.GetDescendants(self)
     local out = {}
     local function add(parent)

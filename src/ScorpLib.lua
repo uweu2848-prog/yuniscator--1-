@@ -642,7 +642,7 @@ function Library:CreateWindow(opts)
     self:_cometMark(searchBg, 8, Vector2.new(0, 0.5), UDim2.new(0, 8, 0.5, 0))
     local searchBox = Make("TextBox", {
         Parent = searchBg, Size = UDim2.new(1, -36, 1, 0), Position = UDim2.new(0, 32, 0, 0), BackgroundTransparency = 1,
-        Text = "", PlaceholderText = "Search tabs...", TextColor3 = self.Theme.TextWhite, PlaceholderColor3 = self.Theme.TextDim,
+        Text = "", PlaceholderText = "Find a destination...", TextColor3 = self.Theme.TextWhite, PlaceholderColor3 = self.Theme.TextDim,
         Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false,
     })
     searchBox.Focused:Connect(function()
@@ -652,6 +652,13 @@ function Library:CreateWindow(opts)
     searchBox.FocusLost:Connect(function()
         Tween(searchBg, { BackgroundTransparency = 0.5 }, 0.2)
         Tween(searchStroke, { Transparency = 0.7, Color = Color3.new(1, 1, 1) }, 0.2)
+    end)
+    self:_connect(UserInputService.InputBegan, function(input, processed)
+        if processed or UserInputService:GetFocusedTextBox() then return end
+        if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.K
+            and (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)) then
+            searchBox:CaptureFocus()
+        end
     end)
 
     -- Typing effect: every character added (letters, numbers, symbols — anything) kicks off a
@@ -677,8 +684,18 @@ function Library:CreateWindow(opts)
         end
         lastLen = #text
         local q = text:lower():match("^%s*(.-)%s*$")
+        local firstMatch
         for _, t in ipairs(self._tabs) do
             t._btn.Visible = (q == "") or (t.Name:lower():find(q, 1, true) ~= nil)
+            if t._btn.Visible and not firstMatch then firstMatch = t end
+        end
+        local noMatches = q ~= "" and firstMatch == nil
+        if self._noTabsLabel then self._noTabsLabel.Visible = noMatches end
+        if noMatches then
+            for _, t in ipairs(self._tabs) do t.Page.Visible = false end
+            if self._pageTitle then self._pageTitle.Text = "NO RESULTS" end
+        elseif firstMatch and (not self.CurrentTab or not self.CurrentTab._btn.Visible or not self.CurrentTab.Page.Visible) then
+            self:SelectTab(firstMatch)
         end
         for _, group in ipairs(self._tabGroups or {}) do
             local hasMatch = false
@@ -697,6 +714,13 @@ function Library:CreateWindow(opts)
     })
     Make("UIListLayout", { Parent = self._tabList, Padding = UDim.new(0, 4) })
     Make("UIPadding", { Parent = self._tabList, PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 15) })
+    self._noTabsLabel = Make("TextLabel", {
+        Parent = self._tabList, Size = UDim2.new(1, -24, 0, 42), Position = UDim2.new(0, 12, 0, 8),
+        BackgroundTransparency = 1, Text = "No matching destinations\nTry another search.",
+        TextColor3 = self.Theme.TextDim, Font = Enum.Font.Gotham, TextSize = 11,
+        TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, Visible = false,
+        LayoutOrder = 100000,
+    })
 
     self._footer = Make("Frame", { Parent = self.Sidebar, Size = UDim2.new(1, 0, 0, 0), Position = UDim2.new(0, 0, 1, 0), BackgroundTransparency = 1, Visible = false })
     local footLine = Make("Frame", { Parent = self._footer, Size = UDim2.new(1, -40, 0, self.Flat and 1 or 2), Position = UDim2.new(0, 20, 0, 0), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 })
@@ -827,7 +851,7 @@ function Window:_updateHint()
     local toggleName = (self.ToggleKey and self.ToggleKey.Name) or "None"
     local txt = "[" .. toggleName .. "] Toggle"
     if self.UnloadKey and self.UnloadKey.Name then txt = txt .. "  |  [" .. self.UnloadKey.Name .. "] Unload" end
-    self._hint.Text = txt
+    self._hint.Text = txt .. "  |  [Ctrl+K] Search"
 end
 
 function Window:SetToggleKey(key)
@@ -1162,7 +1186,7 @@ function Window:CreateTab(name, opts)
             LayoutOrder = self._navOrder,
         })
         Make("UIPadding", { Parent = groupLabel, PaddingLeft = UDim.new(0, 18) })
-        self._bind(function(t) groupLabel.TextColor3 = t.TextDim end)
+        self:_bind(function(t) groupLabel.TextColor3 = t.TextDim end)
         self._tabGroups[#self._tabGroups + 1] = { Name = opts.Group, Label = groupLabel }
     end
     self._lastTabGroup = opts.Group
@@ -1292,8 +1316,9 @@ function Tab:CreateSection(title, expanded)
     layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         if expanded then resize(false) end
     end)
-    header.MouseEnter:Connect(function() win:_play("Hover"); Tween(header, { BackgroundTransparency = 0.1 }, 0.2) end)
-    header.MouseLeave:Connect(function() Tween(header, { BackgroundTransparency = 0.3 }, 0.2) end)
+    local headerTransparency = 0.78
+    header.MouseEnter:Connect(function() win:_play("Hover"); Tween(header, { BackgroundTransparency = 0.58 }, 0.2) end)
+    header.MouseLeave:Connect(function() Tween(header, { BackgroundTransparency = headerTransparency }, 0.2) end)
     header.MouseButton1Click:Connect(function() win:_play("Click"); expanded = not expanded; resize(true) end)
     task.defer(resize, false)
 
@@ -1349,15 +1374,12 @@ end
 function Section:AddButton(name, callback)
     local win = self.Window
     local btn = Make("TextButton", {
-        Parent = self.Content, Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 0.3, Text = name,
-        TextColor3 = win.Theme.TextWhite, Font = Enum.Font.Montserrat, TextSize = 13, AutoButtonColor = false,
+        Parent = self.Content, Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 0.38, Text = name,
+        TextColor3 = win.Theme.TextWhite, Font = Enum.Font.GothamMedium, TextSize = 13, AutoButtonColor = false,
     })
     win:_bind(function(t) btn.BackgroundColor3 = t.ToggleOff end)
-    Corner(btn, 8)
-    if not win.Flat then
-        Make("UIGradient", { Parent = btn, Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(190, 200, 235)) })
-    end
-    win:_stroke(btn, 1, 0.2)
+    Corner(btn, 10)
+    win:_stroke(btn, 1, 0.62)
     local scale = win:_fx(btn, { Grow = 1.04 })
     if not win.Flat then
         btn.MouseButton1Down:Connect(function() Tween(scale, { Scale = 0.94 }, 0.1) end)
@@ -1367,7 +1389,7 @@ function Section:AddButton(name, callback)
         win:_play("Click")
         Tween(btn, { BackgroundColor3 = win.Theme.Accent, BackgroundTransparency = 0 }, 0.1)
         task.delay(0.2, function()
-            if btn.Parent then Tween(btn, { BackgroundColor3 = win.Theme.ToggleOff, BackgroundTransparency = 0.3 }, 0.2) end
+            if btn.Parent then Tween(btn, { BackgroundColor3 = win.Theme.ToggleOff, BackgroundTransparency = 0.38 }, 0.2) end
         end)
         Fire(callback)
     end)
