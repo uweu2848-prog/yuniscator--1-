@@ -12,6 +12,11 @@ return function(H)
         if name == "Player" or name == "Visuals" or name == "Misc" then out.hasPlaceholderTabs = true end
     end
     out.tabOrder = table.concat(H.createdTabs or {}, " > ")
+    out.tabGroups = H.tabGroups or {}
+    out.hasInfoBarShortcuts = H.infoBarOptions ~= nil
+        and type(H.infoBarOptions.OnSettings) == "function"
+        and type(H.infoBarOptions.OnGlobe) == "function"
+        and type(H.infoBarOptions.OnNametag) == "function"
     out.hasStaffPanelButton = H.controls["Admin Panel · Staff"] ~= nil
     out.toggleKeyHasConfigFlag = H.controls["Menu Toggle Key"] and H.controls["Menu Toggle Key"].Flag == "menu_toggle_key"
     local function preview()
