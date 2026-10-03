@@ -255,7 +255,7 @@ do
     sec:AddButton("✨   Open Shader Studio", function()
         if ShaderEngine then ShaderEngine.Open() end
     end)
-    sec:AddButton("   Open Quick Actions", function()
+    sec:AddButton("✨   Open Quick Actions", function()
         if PlaylistPlayer then PlaylistPlayer.Open() end
     end)
     sec:AddButton("♙   Open Player List", function()
