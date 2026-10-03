@@ -34,6 +34,15 @@ local Shaders = (function()
 --@include shaders.lua
 end)()
 
+-- Read-only current-server roster and client-local playlist.
+local PlayerRoster = (function()
+--@include playerroster.lua
+end)()
+
+local Playlist = (function()
+--@include playlist.lua
+end)()
+
 -- Staff-panel code is fetched separately only after the server authorizes this session.
 local AdminPanel = nil
 local TagPanel = nil
@@ -163,6 +172,8 @@ local TagManagerPanel = (tagManagerAuthorized and not staffAuthorized and TagPan
 local SupportStaffPanel = (supportAuthorized and not staffAuthorized and not tagManagerAuthorized and SupportPanel) and SupportPanel.Build(Window, ctx) or nil
 local Editor = nil
 local ShaderEngine = nil
+local Roster = nil
+local PlaylistPlayer = nil
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Home
@@ -242,6 +253,15 @@ do
     sec:AddButton("✨   Open Shader Studio", function()
         if ShaderEngine then ShaderEngine.Open() end
     end)
+    sec:AddButton("♫   Open Playlist", function()
+        if PlaylistPlayer then PlaylistPlayer.Open() end
+    end)
+    sec:AddButton("♙   Open Player List", function()
+        if Roster then Roster.Open() end
+    end)
+    sec:AddButton("♫   Open Playlist", function()
+        if PlaylistPlayer then PlaylistPlayer.Open() end
+    end)
     if StaffPanel then
         sec:AddButton("⚑   Open Staff Console", function() StaffPanel.Open() end)
     elseif TagManagerPanel then
@@ -268,8 +288,27 @@ do
 end
 
 -- Keep navigation focused on real, supported features rather than demo tabs.
+Roster = PlayerRoster.Build(Window, Players, LocalPlayer)
 Editor = TagEditor.Build(Window, Nametags)
 ShaderEngine = Shaders.Build(Window)
+PlaylistPlayer = Playlist.Build(Window)
+
+do
+    local About = Window:CreateTab("About", { Icon = "ⓘ", Group = "About" })
+    local section = About:CreateSection("ABOUT SCORP", true)
+    section:AddLabel("SCORP · Identity / Visuals / Community", { Wrap = true, TextSize = 15, Color = Window.Theme.AccentLight })
+    section:AddLabel("A community client for player identity, local visual customization, and server-aware nametags.", { Wrap = true, Color = Window.Theme.TextWhite })
+    section:AddLabel("Release  " .. tostring(ctx.releaseChannel or "production") .. " · " .. tostring(ctx.releaseVersion or ctx.build or "unversioned"), { Wrap = true, Color = Window.Theme.TextDim })
+    section:AddButton("Copy Scorp Discord Invite", function()
+        local invite = "https://discord.gg/scorp"
+        local copy = setclipboard or toclipboard
+        if type(copy) == "function" and pcall(copy, invite) then
+            Window:Notify("Invite copied", "Discord invite copied to clipboard.", 3, Window.Theme.Success)
+        else
+            Window:Notify("Scorp Community", invite, 5, Window.Theme.AccentLight)
+        end
+    end)
+end
 
 -- ───────────────────────────────────────────────────────────────────────────
 --  Settings
@@ -346,6 +385,9 @@ local InfoBar = Window:CreateInfoBar({
     OnNametag = function()
         if Editor then Editor.Open() end
     end,
+    OnPlaylist = function()
+        if PlaylistPlayer then PlaylistPlayer.Open() end
+    end,
     OnDiscord = function()
         local invite = "https://discord.gg/scorp"
         local copy = setclipboard or toclipboard
@@ -366,6 +408,8 @@ ctx.revoke = function(message, updateRequired)
     if updateRequired then
         pcall(Editor.Destroy)
         pcall(ShaderEngine.Destroy)
+        pcall(PlaylistPlayer.Destroy)
+        pcall(Roster.Destroy)
         pcall(InfoBar.Destroy)
         if StaffPanel then pcall(StaffPanel.Destroy) end
         if TagManagerPanel then pcall(TagManagerPanel.Destroy) end
@@ -438,6 +482,8 @@ Window:OnUnload(function()
     print("[Scorp] unloaded")
     pcall(Editor.Destroy)
     pcall(ShaderEngine.Destroy)
+    pcall(PlaylistPlayer.Destroy)
+    pcall(Roster.Destroy)
     pcall(InfoBar.Destroy)
     if StaffPanel then pcall(StaffPanel.Destroy) end
     if TagManagerPanel then pcall(TagManagerPanel.Destroy) end

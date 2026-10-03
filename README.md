@@ -32,6 +32,8 @@ The Shaders tab ports Yuniku-inspired Unreal, Cinematic, and Bodycam looks with 
 
 The persistent top status dock is inspired by Yuniku's HUD and presents Scorp channel identity, live player count, ping, FPS, local time, and shortcuts to settings, shaders, name tags, and the community. It scales to fit narrower viewports and is removed during unload or update cleanup.
 
+The workspace also includes a read-only Players roster, a local Playlist for user-provided Roblox audio asset IDs, and an About page. Playlist entries are session-only, and playback remains subject to Roblox audio permissions in the current experience. Yuniku's emote spoof/bypass actions are intentionally not included.
+
 The in-game admin panel source is excluded from the public payload bundle. After authorization, the client fetches a separately obfuscated module from the backend; non-admin sessions cannot download it and get no panel button. The free name-tag editor is available as its own main-window tab. The menu toggle key is stored in the executor's `Scorp/default.json` config when file APIs are available and restored automatically on next launch. Code delivered to an authorized client can still be inspected; the server remains authoritative for every admin action.
 
 ## Releases and build verification

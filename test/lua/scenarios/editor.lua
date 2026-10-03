@@ -3,11 +3,14 @@ return function(H)
     H.runLoader()
     H.advance(3)
 
-    local out = { hasPreviewHolder = #H.customFrames >= 2, hasFreeNameTagsTab = false, hasShadersTab = false, hasHomeTab = false, hasSettingsTab = false, hasPlaceholderTabs = false }
+    local out = { hasPreviewHolder = #H.customFrames >= 2, hasFreeNameTagsTab = false, hasShadersTab = false, hasHomeTab = false, hasSettingsTab = false, hasPlayersTab = false, hasPlaylistTab = false, hasAboutTab = false, hasPlaceholderTabs = false }
     for _, name in ipairs(H.createdTabs or {}) do
         if name == "Home" then out.hasHomeTab = true end
+        if name == "Players" then out.hasPlayersTab = true end
         if name == "Free Name Tags" then out.hasFreeNameTagsTab = true end
         if name == "Shaders" then out.hasShadersTab = true end
+        if name == "Playlist" then out.hasPlaylistTab = true end
+        if name == "About" then out.hasAboutTab = true end
         if name == "Settings" then out.hasSettingsTab = true end
         if name == "Player" or name == "Visuals" or name == "Misc" then out.hasPlaceholderTabs = true end
     end
@@ -17,6 +20,7 @@ return function(H)
         and type(H.infoBarOptions.OnSettings) == "function"
         and type(H.infoBarOptions.OnGlobe) == "function"
         and type(H.infoBarOptions.OnNametag) == "function"
+        and type(H.infoBarOptions.OnPlaylist) == "function"
         and type(H.infoBarOptions.OnDiscord) == "function"
     out.infoBarIdentity = H.infoBarOptions and H.infoBarOptions.Brand == "SCORP"
         and H.infoBarOptions.Channel == "PRODUCTION"
@@ -41,6 +45,13 @@ return function(H)
         and H.controls["Stop Engine / Restore"] ~= nil
     out.hasDashboardActions = H.controls["🏷️   Open Name Tag Studio"] ~= nil
         and H.controls["✨   Open Shader Studio"] ~= nil
+        and H.controls["♫   Open Playlist"] ~= nil
+        and H.controls["♙   Open Player List"] ~= nil
+    out.hasPlaylistControls = H.controls["Audio asset ID"] ~= nil
+        and H.controls["＋   Add Track"] ~= nil
+        and H.controls["▶   Play / Resume"] ~= nil
+        and H.controls["◀   Previous Track"] ~= nil
+        and H.controls["▶   Next Track"] ~= nil
 
     ctl("Color Theme:").Callback("Cyber Blue")
     ctl("Font Style:").Callback("Sci-Fi")

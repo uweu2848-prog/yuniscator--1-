@@ -712,7 +712,7 @@ function Library:CreateWindow(opts)
         BackgroundTransparency = 1, ScrollBarThickness = 0, AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(), ClipsDescendants = true, BorderSizePixel = 0,
     })
-    Make("UIListLayout", { Parent = self._tabList, Padding = UDim.new(0, 4) })
+    Make("UIListLayout", { Parent = self._tabList, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder })
     Make("UIPadding", { Parent = self._tabList, PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 15) })
     self._noTabsLabel = Make("TextLabel", {
         Parent = self._tabList, Size = UDim2.new(1, -24, 0, 42), Position = UDim2.new(0, 12, 0, 8),
@@ -1216,6 +1216,7 @@ function Window:CreateTab(name, opts)
         Parent = self._pages, Size = UDim2.new(1, -12, 1, -6), Position = UDim2.new(0, 6, 0, 0), BackgroundTransparency = 1,
         Visible = false, BorderSizePixel = 0, ScrollBarThickness = 2, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
     })
+    page.Name = "Page_" .. tostring(name):gsub("[^%w_]", "")
     self:_bind(function(t) page.ScrollBarImageColor3 = t.Accent end)
     local pageScale = Make("UIScale", { Parent = page, Scale = 1 })
     Make("UIPadding", { Parent = page, PaddingTop = UDim.new(0, 6), PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 25), PaddingBottom = UDim.new(0, 25) })
@@ -2365,6 +2366,17 @@ function Window:CreateInfoBar(opts)
             local body = mark(b, UDim2.fromOffset(14, 7), UDim2.new(0.5, 0, 0.5, 5))
             Corner(body, 4)
         end, opts.OnNametag)
+    end
+
+    if opts.OnPlaylist then
+        iconBtn(function(b)
+            local stem = mark(b, UDim2.fromOffset(2, 12), UDim2.new(0.5, 3, 0.5, -1))
+            stem.Rotation = 12
+            local noteHead = mark(b, UDim2.fromOffset(6, 5), UDim2.new(0.5, -1, 0.5, 6))
+            Round(noteHead)
+            local flag = mark(b, UDim2.fromOffset(7, 2), UDim2.new(0.5, 6, 0.5, -7))
+            Corner(flag, 1)
+        end, opts.OnPlaylist)
     end
 
     local api = { Frame = bar }

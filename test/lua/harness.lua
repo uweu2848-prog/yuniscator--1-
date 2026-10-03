@@ -129,7 +129,7 @@ local SIGNAL_NAMES = {
     InputBegan = true, InputChanged = true, InputEnded = true, Changed = true,
     MouseEnter = true, MouseLeave = true, MouseButton1Click = true,
     MouseButton1Down = true, MouseButton1Up = true, Focused = true, FocusLost = true,
-    Activated = true, AncestryChanged = true,
+    Activated = true, AncestryChanged = true, Ended = true,
 }
 local function setParent(inst, parent)
     local old = rawget(inst, "_parent")
@@ -231,6 +231,8 @@ local services = {
     Players = {
         LocalPlayer = me,
         GetPlayers = function() return players end,
+        PlayerAdded = setmetatable({ listeners = {} }, Signal),
+        PlayerRemoving = setmetatable({ listeners = {} }, Signal),
         GetPlayerByUserId = function(_, id) for _, p in ipairs(players) do if p.UserId == id then return p end end end,
         GetUserThumbnailAsync = function(_, id) return "rbxthumb://type=AvatarHeadShot&id=" .. id, true end,
     },
@@ -350,6 +352,7 @@ local Section = setmetatable({}, { __index = function(_, k)
             local obj = { value = opts and opts.Default }
             function obj:Set(v) self.value = v end
             function obj:Get() return self.value end
+            function obj:Refresh(values) self.options = values or {} end
             H.controlObjs[name] = obj
             return obj
         end

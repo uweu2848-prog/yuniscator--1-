@@ -3,7 +3,7 @@
 local PlayerRoster = {}
 
 function PlayerRoster.Build(Window, Players, LocalPlayer)
-    local tab = Window:CreateTab("Players", { Icon = "♙" })
+    local tab = Window:CreateTab("Players", { Icon = "♙", Group = "Workspace" })
     local rosterDropdown
     local detail
     local choicesByLabel = {}
@@ -45,6 +45,10 @@ function PlayerRoster.Build(Window, Players, LocalPlayer)
     connections[#connections + 1] = Players.PlayerRemoving:Connect(function() task.defer(refresh) end)
 
     local api = {}
+    function api.Open()
+        Window:Toggle(true)
+        Window:SelectTab(tab)
+    end
     function api.Refresh() refresh() end
     function api.Destroy()
         for _, connection in ipairs(connections) do pcall(function() connection:Disconnect() end) end
